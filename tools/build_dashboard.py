@@ -9,6 +9,9 @@ import io
 import json
 import math
 import re
+import shutil
+import sys
+import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
@@ -2626,6 +2629,83 @@ def dedupe_pdf_paths(pdf_paths: list[Path], source_urls: dict[str, str]) -> tupl
   return sorted(unique_paths), skipped
 
 
+def format_duration(seconds: float) -> str:
+  total_seconds = max(0, int(seconds))
+  minutes, remaining_seconds = divmod(total_seconds, 60)
+  hours, remaining_minutes = divmod(minutes, 60)
+  if hours:
+    return f"{hours:d}:{remaining_minutes:02d}:{remaining_seconds:02d}"
+  return f"{remaining_minutes:02d}:{remaining_seconds:02d}"
+
+
+def shorten_progress_label(label: str, max_length: int) -> str:
+  if max_length <= 0:
+    return ""
+  if len(label) <= max_length:
+    return label
+  if max_length <= 3:
+    return "." * max_length
+  remaining = max_length - 3
+  head = max(1, remaining // 2)
+  tail = max(1, remaining - head)
+  return f"{label[:head]}...{label[-tail:]}"
+
+
+@dataclass
+class BuildProgressBar:
+  total: int
+  enabled: bool
+  stream: io.TextIOBase = sys.stderr
+
+  def __post_init__(self) -> None:
+    self.completed = 0
+    self.cached = 0
+    self.analyzed = 0
+    self.started_at = time.monotonic()
+    if self.enabled:
+      self.render("Starting")
+
+  def advance(self, path: Path, *, cached: bool) -> None:
+    self.completed += 1
+    if cached:
+      self.cached += 1
+      state = "cached"
+    else:
+      self.analyzed += 1
+      state = "analyzed"
+    if self.enabled:
+      self.render(f"{state}: {path.name}")
+
+  def finish(self) -> None:
+    if self.enabled:
+      self.render("Complete")
+      self.stream.write("\n")
+      self.stream.flush()
+
+  def render(self, status: str) -> None:
+    width = max(10, shutil.get_terminal_size(fallback=(100, 20)).columns)
+    ratio = 1.0 if self.total == 0 else min(1.0, self.completed / self.total)
+    bar_width = max(10, min(20, width // 6))
+    filled = int(round(bar_width * ratio))
+    bar = f"{'#' * filled}{'-' * max(0, bar_width - filled)}"
+    elapsed = time.monotonic() - self.started_at
+    eta_seconds = 0.0
+    if self.completed and self.completed < self.total:
+      eta_seconds = (elapsed / self.completed) * (self.total - self.completed)
+
+    prefix = (
+      f"[{bar}] {self.completed}/{self.total} {ratio * 100:3.0f}% "
+      f"el {format_duration(elapsed)} eta {format_duration(eta_seconds)} "
+      f"c{self.cached} a{self.analyzed}"
+    )
+    available = max(0, width - len(prefix) - 3)
+    suffix = shorten_progress_label(status, available)
+    line = prefix if not suffix else f"{prefix} | {suffix}"
+    max_line_length = max(1, width - 1)
+    self.stream.write("\r" + line[:max_line_length].ljust(max_line_length))
+    self.stream.flush()
+
+
 def main() -> int:
     args = parse_args()
     source_dir = args.source_dir
@@ -2655,6 +2735,7 @@ def main() -> int:
     cached_documents = 0
     analyzed_documents = 0
     review_file_updates = 0
+    progress = BuildProgressBar(total=len(pdf_paths), enabled=sys.stderr.isatty())
 
     for path in pdf_paths:
         current_review = review_overrides.get(path.name)
@@ -2684,6 +2765,7 @@ def main() -> int:
                 review_file_updates += 1
             documents.append(cached_payload["document"])
             cached_documents += 1
+            progress.advance(path, cached=True)
             continue
 
         review_count_before = len(review_overrides)
@@ -2716,6 +2798,10 @@ def main() -> int:
         if len(review_overrides) != review_count_before:
             write_review_overrides(args.review_file, review_overrides)
             review_file_updates += 1
+
+        progress.advance(path, cached=False)
+
+    progress.finish()
 
     analysis = build_analysis(documents, source_dir)
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
