@@ -1512,6 +1512,114 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       text-transform: uppercase;
     }}
 
+    .tab-strip {{
+      margin-top: 18px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }}
+
+    .tab-button {{
+      appearance: none;
+      border: 1px solid rgba(31, 46, 56, 0.14);
+      background: rgba(255, 255, 255, 0.55);
+      color: var(--muted);
+      padding: 11px 16px;
+      font: inherit;
+      font-size: 0.82rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 140ms ease, color 140ms ease, border-color 140ms ease, transform 140ms ease;
+    }}
+
+    .tab-button:hover,
+    .tab-button:focus-visible {{
+      outline: none;
+      border-color: rgba(184, 132, 50, 0.44);
+      color: var(--ink);
+      transform: translateY(-1px);
+    }}
+
+    .tab-button[aria-selected="true"] {{
+      background: linear-gradient(180deg, rgba(184, 132, 50, 0.2), rgba(255, 251, 240, 0.92));
+      border-color: rgba(184, 132, 50, 0.44);
+      color: var(--ink);
+    }}
+
+    .tab-panel[hidden] {{
+      display: none;
+    }}
+
+    .tab-panel > .grid,
+    .tab-panel > .filters,
+    .tab-panel > .panel {{
+      margin-top: 18px;
+    }}
+
+    .documents-summary {{
+      margin-top: 18px;
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }}
+
+    .pagination {{
+      margin-top: 18px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }}
+
+    .pagination-summary {{
+      color: var(--muted);
+      font-size: 0.9rem;
+    }}
+
+    .pagination-controls {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+    }}
+
+    .pagination-button {{
+      appearance: none;
+      min-width: 42px;
+      border: 1px solid rgba(31, 46, 56, 0.14);
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--ink);
+      padding: 8px 12px;
+      font: inherit;
+      font-size: 0.84rem;
+      cursor: pointer;
+      transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+    }}
+
+    .pagination-button:hover,
+    .pagination-button:focus-visible {{
+      outline: none;
+      border-color: rgba(184, 132, 50, 0.44);
+      background: rgba(255, 251, 240, 0.95);
+    }}
+
+    .pagination-button[aria-current="page"] {{
+      background: rgba(45, 112, 117, 0.16);
+      border-color: rgba(45, 112, 117, 0.28);
+      color: #154246;
+    }}
+
+    .pagination-button:disabled {{
+      cursor: default;
+      opacity: 0.45;
+    }}
+
     .filters,
     .panel {{
       margin-top: 18px;
@@ -1735,8 +1843,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     }}
 
     .table-wrap {{
-      max-height: 760px;
-      overflow: auto;
+      overflow: visible;
     }}
 
     .footer-note {{
@@ -1773,78 +1880,92 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       </div>
     </section>
 
-    <section class=\"filters\">
-      <label>Keyword Search
-        <input id=\"searchInput\" type=\"search\" placeholder=\"Search titles, summaries, themes, agencies\">
-      </label>
-      <label>Document Type
-        <select id=\"typeFilter\"></select>
-      </label>
-      <label>Extraction Method
-        <select id=\"methodFilter\"></select>
-      </label>
-      <label>Evidence Category
-        <select id="categoryFilter"></select>
-      </label>
-      <label>Geography
-        <select id=\"placeFilter\"></select>
-      </label>
-      <label>Year From
-        <input id=\"yearMin\" type=\"number\" inputmode=\"numeric\">
-      </label>
-      <label>Year To
-        <input id=\"yearMax\" type=\"number\" inputmode=\"numeric\">
-      </label>
+    <div class=\"tab-strip\" role=\"tablist\" aria-label=\"Dashboard sections\">
+      <button class=\"tab-button\" id=\"tab-overview\" type=\"button\" role=\"tab\" aria-selected=\"true\" aria-controls=\"panel-overview\" data-tab=\"overview\">Observatory</button>
+      <button class=\"tab-button\" id=\"tab-documents\" type=\"button\" role=\"tab\" aria-selected=\"false\" aria-controls=\"panel-documents\" data-tab=\"documents\" tabindex=\"-1\">Documents</button>
+    </div>
+
+    <section class=\"tab-panel\" id=\"panel-overview\" role=\"tabpanel\" aria-labelledby=\"tab-overview\">
+      <div class=\"grid\">
+        <section class=\"panel span-12\">
+          <h2>Corpus Summary</h2>
+          <div id=\"metrics\" class=\"metrics\"></div>
+        </section>
+
+        <section class=\"panel span-8\">
+          <h2>Document Timeline</h2>
+          <div id=\"timelineChart\" class=\"svg-wrap\"></div>
+        </section>
+
+        <section class=\"panel span-4\">
+          <h2>Research Signals</h2>
+          <div id=\"researchSignals\" class=\"signal-list\"></div>
+        </section>
+
+        <section class="panel span-4">
+          <h2>Evidence Classification</h2>
+          <div id="classificationChart" class="svg-wrap"></div>
+          <div class="classification-note">Category One marks detailed event files with eyewitness depth and at least one hard-evidence signal. Category Two captures partially corroborated events. Category Three marks files with limited support or sparse witness material.</div>
+        </section>
+
+        <section class=\"panel span-8\">
+          <h2>Geolocation Constellation</h2>
+          <div id=\"mapChart\" class=\"svg-wrap\"></div>
+        </section>
+
+        <section class=\"panel span-4\">
+          <h2>Location Hotspots</h2>
+          <div id=\"hotspots\" class=\"hotspot-list\"></div>
+        </section>
+
+        <section class=\"panel span-4\">
+          <h2>Document Types</h2>
+          <div id=\"typeChart\" class=\"svg-wrap\"></div>
+        </section>
+
+        <section class=\"panel span-4\">
+          <h2>Organizations Mentioned</h2>
+          <div id=\"organizationChart\" class=\"svg-wrap\"></div>
+        </section>
+
+        <section class=\"panel span-12\">
+          <h2>Recurring Themes</h2>
+          <div id=\"themeGrid\" class=\"theme-grid\"></div>
+        </section>
+      </div>
     </section>
 
-    <div class=\"grid\">
-      <section class=\"panel span-12\">
-        <h2>Corpus Summary</h2>
-        <div id=\"metrics\" class=\"metrics\"></div>
+    <section class=\"tab-panel\" id=\"panel-documents\" role=\"tabpanel\" aria-labelledby=\"tab-documents\" hidden>
+      <section class=\"filters\">
+        <label>Keyword Search
+          <input id=\"searchInput\" type=\"search\" placeholder=\"Search titles, summaries, themes, agencies\">
+        </label>
+        <label>Document Type
+          <select id=\"typeFilter\"></select>
+        </label>
+        <label>Extraction Method
+          <select id=\"methodFilter\"></select>
+        </label>
+        <label>Evidence Category
+          <select id="categoryFilter"></select>
+        </label>
+        <label>Geography
+          <select id=\"placeFilter\"></select>
+        </label>
+        <label>Year From
+          <input id=\"yearMin\" type=\"number\" inputmode=\"numeric\">
+        </label>
+        <label>Year To
+          <input id=\"yearMax\" type=\"number\" inputmode=\"numeric\">
+        </label>
       </section>
 
-      <section class=\"panel span-8\">
-        <h2>Document Timeline</h2>
-        <div id=\"timelineChart\" class=\"svg-wrap\"></div>
-      </section>
+      <div class=\"documents-summary\">
+        <div>Refine the corpus here, then flip back to Observatory to see the same filtered subset across the charts.</div>
+        <strong id=\"documentCount\"></strong>
+      </div>
 
-      <section class=\"panel span-4\">
-        <h2>Research Signals</h2>
-        <div id=\"researchSignals\" class=\"signal-list\"></div>
-      </section>
-
-      <section class="panel span-4">
-        <h2>Evidence Classification</h2>
-        <div id="classificationChart" class="svg-wrap"></div>
-        <div class="classification-note">Category One marks detailed event files with eyewitness depth and at least one hard-evidence signal. Category Two captures partially corroborated events. Category Three marks files with limited support or sparse witness material.</div>
-      </section>
-
-      <section class=\"panel span-8\">
-        <h2>Geolocation Constellation</h2>
-        <div id=\"mapChart\" class=\"svg-wrap\"></div>
-      </section>
-
-      <section class=\"panel span-4\">
-        <h2>Location Hotspots</h2>
-        <div id=\"hotspots\" class=\"hotspot-list\"></div>
-      </section>
-
-      <section class=\"panel span-4\">
-        <h2>Document Types</h2>
-        <div id=\"typeChart\" class=\"svg-wrap\"></div>
-      </section>
-
-      <section class=\"panel span-4\">
-        <h2>Organizations Mentioned</h2>
-        <div id=\"organizationChart\" class=\"svg-wrap\"></div>
-      </section>
-
-      <section class=\"panel span-12\">
-        <h2>Recurring Themes</h2>
-        <div id=\"themeGrid\" class=\"theme-grid\"></div>
-      </section>
-
-      <section class=\"panel span-12\">
+      <section class=\"panel\">
         <h2>Document Register</h2>
         <div class=\"table-wrap\">
           <table>
@@ -1859,18 +1980,25 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
             <tbody id=\"documentRows\"></tbody>
           </table>
         </div>
+        <div class=\"pagination\">
+          <div id=\"paginationSummary\" class=\"pagination-summary\"></div>
+          <div id=\"paginationControls\" class=\"pagination-controls\"></div>
+        </div>
         <div class=\"footer-note\">Rows marked with OCR page counts used image-based text recovery on low-text pages. Documents that hit the OCR cap may deserve a deeper rerun for exhaustive archival study.</div>
       </section>
-    </div>
+    </section>
   </div>
 
   <script id=\"analysis-data\" type=\"application/json\">__DATA_JSON__</script>
   <script id=\"world-land-data\" type=\"application/json\">__WORLD_LAND_JSON__</script>
   <script>
+    const DOCUMENTS_PER_PAGE = 10;
     const analysis = JSON.parse(document.getElementById('analysis-data').textContent);
     const worldLand = JSON.parse(document.getElementById('world-land-data').textContent);
     const documents = analysis.documents.slice().sort((a, b) => (b.year || 0) - (a.year || 0) || a.title.localeCompare(b.title));
     const state = {
+      activeTab: 'overview',
+      page: 1,
       search: '',
       type: 'all',
       method: 'all',
@@ -1896,6 +2024,10 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         counts.set(key, (counts.get(key) || 0) + 1);
       });
       return [...counts.entries()].map(([label, count]) => ({ label, count }));
+    }
+
+    function resetDocumentPage() {
+      state.page = 1;
     }
 
     function filteredDocuments() {
@@ -2176,7 +2308,12 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     }
 
     function renderDocuments(items) {
-      const rows = items.map((doc) => {
+      const totalItems = items.length;
+      const totalPages = Math.max(1, Math.ceil(totalItems / DOCUMENTS_PER_PAGE));
+      state.page = Math.min(Math.max(state.page, 1), totalPages);
+      const startIndex = totalItems ? (state.page - 1) * DOCUMENTS_PER_PAGE : 0;
+      const pageItems = items.slice(startIndex, startIndex + DOCUMENTS_PER_PAGE);
+      const rows = pageItems.map((doc) => {
         const categoryClass = doc.evidence_category_rank === 1
           ? 'category-one'
           : doc.evidence_category_rank === 2
@@ -2217,7 +2354,85 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
             <td>${escapeHtml(doc.summary_narrative || 'No summary narrative available.')}${visualNote}</td>
           </tr>`;
       }).join('');
+      const paginationSummary = totalItems
+        ? `Showing ${startIndex + 1}-${Math.min(startIndex + DOCUMENTS_PER_PAGE, totalItems)} of ${totalItems} documents`
+        : 'No documents in register';
+      document.getElementById('documentCount').textContent = `${totalItems} documents in register`;
+      document.getElementById('paginationSummary').textContent = paginationSummary;
       document.getElementById('documentRows').innerHTML = rows || '<tr><td colspan="4">No documents match the current filters.</td></tr>';
+      renderPaginationControls(totalItems, totalPages);
+    }
+
+    function renderPaginationControls(totalItems, totalPages) {
+      const container = document.getElementById('paginationControls');
+      if (!totalItems) {
+        container.innerHTML = '';
+        return;
+      }
+      const pages = [];
+      const windowStart = Math.max(1, state.page - 2);
+      const windowEnd = Math.min(totalPages, windowStart + 4);
+      const adjustedStart = Math.max(1, windowEnd - 4);
+      for (let page = adjustedStart; page <= windowEnd; page += 1) {
+        pages.push(page);
+      }
+      const pageButtons = pages.map((page) => `
+        <button
+          class="pagination-button"
+          type="button"
+          data-page="${page}"
+          aria-label="Go to page ${page}"
+          ${page === state.page ? 'aria-current="page"' : ''}
+        >${page}</button>`).join('');
+      container.innerHTML = `
+        <button class="pagination-button" type="button" data-page="${state.page - 1}" ${state.page === 1 ? 'disabled' : ''}>Previous</button>
+        ${pageButtons}
+        <button class="pagination-button" type="button" data-page="${state.page + 1}" ${state.page === totalPages ? 'disabled' : ''}>Next</button>`;
+      container.querySelectorAll('[data-page]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const nextPage = Number(button.dataset.page);
+          if (!Number.isFinite(nextPage) || nextPage === state.page || nextPage < 1 || nextPage > totalPages) {
+            return;
+          }
+          state.page = nextPage;
+          renderDocuments(filteredDocuments());
+        });
+      });
+    }
+
+    function setActiveTab(tab) {
+      state.activeTab = tab;
+      const tabs = document.querySelectorAll('[role="tab"]');
+      const panels = document.querySelectorAll('.tab-panel');
+      tabs.forEach((button) => {
+        const isActive = button.dataset.tab === tab;
+        button.setAttribute('aria-selected', String(isActive));
+        button.tabIndex = isActive ? 0 : -1;
+      });
+      panels.forEach((panel) => {
+        panel.hidden = panel.id !== `panel-${tab}`;
+      });
+      updateDashboard();
+    }
+
+    function initTabs() {
+      const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+      tabs.forEach((button, index) => {
+        button.addEventListener('click', () => setActiveTab(button.dataset.tab));
+        button.addEventListener('keydown', (event) => {
+          if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft' && event.key !== 'Home' && event.key !== 'End') {
+            return;
+          }
+          event.preventDefault();
+          let nextIndex = index;
+          if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+          if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
+          if (event.key === 'Home') nextIndex = 0;
+          if (event.key === 'End') nextIndex = tabs.length - 1;
+          tabs[nextIndex].focus();
+          setActiveTab(tabs[nextIndex].dataset.tab);
+        });
+      });
     }
 
     function updateDashboard() {
@@ -2250,36 +2465,44 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
 
       document.getElementById('searchInput').addEventListener('input', (event) => {{
         state.search = event.target.value;
+        resetDocumentPage();
         updateDashboard();
       }});
       document.getElementById('typeFilter').addEventListener('change', (event) => {{
         state.type = event.target.value;
+        resetDocumentPage();
         updateDashboard();
       }});
       document.getElementById('methodFilter').addEventListener('change', (event) => {{
         state.method = event.target.value;
+        resetDocumentPage();
         updateDashboard();
       }});
       document.getElementById('categoryFilter').addEventListener('change', (event) => {{
         state.category = event.target.value;
+        resetDocumentPage();
         updateDashboard();
       }});
       document.getElementById('placeFilter').addEventListener('change', (event) => {{
         state.place = event.target.value;
+        resetDocumentPage();
         updateDashboard();
       }});
       document.getElementById('yearMin').addEventListener('input', (event) => {{
         state.yearMin = Number(event.target.value) || analysis.year_min || 1900;
+        resetDocumentPage();
         updateDashboard();
       }});
       document.getElementById('yearMax').addEventListener('input', (event) => {{
         state.yearMax = Number(event.target.value) || analysis.year_max || new Date().getFullYear();
+        resetDocumentPage();
         updateDashboard();
       }});
       window.addEventListener('resize', () => updateDashboard());
     }
 
     renderMeta();
+    initTabs();
     initFilters();
     updateDashboard();
   </script>
