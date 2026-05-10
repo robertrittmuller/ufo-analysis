@@ -1868,10 +1868,10 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
 </head>
 <body>
   <div class=\"shell\">
-    <section class=\"hero\">
+  <title>UAP/UFO Research</title>
       <div class=\"eyebrow\">Research Dashboard</div>
-      <h1>UFO Research</h1>
-      <p class=\"subtitle\">A light art deco reading room for mixed-format UFO and UAP archives. This dashboard blends native PDF parsing with OCR fallback so scanned incident files, mission reports, cables, transcripts, and imagery references can be compared on the same timeline and map.</p>
+      <h1>UAP/UFO Research</h1>
+      <p class="subtitle">Explore and compare declassified UAP and UFO records with OCR-backed text extraction, timelines, maps, and document filters. The dataset comes from the public war.gov/ufo release and is processed locally into searchable summaries and metadata.</p>
       <div class=\"hero-meta\">
         <span id=\"metaDocs\"></span>
         <span id=\"metaPages\"></span>
