@@ -2397,6 +2397,45 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       color: var(--muted);
     }}
 
+    .site-footer {{
+      margin: 24px 0 0;
+      padding: 18px 0 8px;
+      border-top: 1px solid rgba(244, 239, 225, 0.12);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: start;
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.62;
+    }}
+
+    .site-footer strong {{
+      color: var(--ink);
+      font-weight: 600;
+    }}
+
+    .site-footer a {{
+      color: var(--ink);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(214, 168, 79, 0.48);
+    }}
+
+    .site-footer a:hover,
+    .site-footer a:focus-visible {{
+      color: var(--teal);
+      outline: none;
+      border-bottom-color: var(--teal);
+    }}
+
+    .footer-kicker {{
+      margin-bottom: 6px;
+      color: var(--gold);
+      font-size: 0.68rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }}
+
     @media (max-width: 1120px) {{
       .hero {{
         grid-template-columns: 1fr;
@@ -2447,6 +2486,11 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       .documents-summary {{
         align-items: flex-start;
         flex-direction: column;
+      }}
+
+      .site-footer {{
+        grid-template-columns: 1fr;
+        gap: 12px;
       }}
 
       .table-wrap table,
@@ -2654,6 +2698,14 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         <div class=\"footer-note\">Rows marked with OCR page counts used image-based text recovery on low-text pages. Documents that hit the OCR cap may deserve a deeper rerun for exhaustive archival study.</div>
       </section>
     </section>
+
+    <footer class=\"site-footer\">
+      <div>
+        <div class=\"footer-kicker\">AI Processing Note</div>
+        <div>This dashboard uses AI to process public UAP/UFO records by extracting text with native PDF parsing and OCR where needed, then applying local AI review to summarize documents, classify evidence strength, identify themes, agencies, dates, and locations, and surface corpus-level research signals.</div>
+      </div>
+      <div>Maintained by <strong><a href=\"https://rittmuller.com\" target=\"_blank\" rel=\"noopener noreferrer\">Robert Rittmuller</a></strong>.</div>
+    </footer>
   </div>
 
   <script id=\"analysis-data\" type=\"application/json\">__DATA_JSON__</script>
