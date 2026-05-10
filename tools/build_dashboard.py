@@ -1637,33 +1637,44 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
 <head>
   <meta charset=\"utf-8\">
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-  <title>UFO Research</title>
+  <title>UAP/UFO Research</title>
   <style>
     :root {{
-      --paper: #f7f0df;
-      --paper-deep: #efe3c6;
-      --ink: #1f2e38;
-      --muted: #56636b;
-      --gold: #b88432;
-      --gold-soft: rgba(184, 132, 50, 0.2);
-      --teal: #2d7075;
-      --teal-soft: rgba(45, 112, 117, 0.14);
-      --panel: rgba(255, 251, 240, 0.86);
-      --line: rgba(31, 46, 56, 0.12);
-      --shadow: 0 20px 50px rgba(72, 61, 38, 0.12);
+      --void: #07080b;
+      --night: #0d1118;
+      --panel: rgba(17, 21, 29, 0.88);
+      --panel-deep: rgba(10, 13, 18, 0.94);
+      --ink: #f4efe1;
+      --muted: #9aa5b8;
+      --dim: #667085;
+      --line: rgba(214, 168, 79, 0.18);
+      --line-cool: rgba(86, 214, 201, 0.18);
+      --gold: #d6a84f;
+      --gold-soft: rgba(214, 168, 79, 0.16);
+      --teal: #56d6c9;
+      --teal-soft: rgba(86, 214, 201, 0.12);
+      --red: #c84e53;
+      --green: #9bb46e;
+      --blue: #7d9cff;
+      --shadow: 0 28px 70px rgba(0, 0, 0, 0.38);
     }}
 
     * {{ box-sizing: border-box; }}
 
+    html {{
+      background: var(--void);
+    }}
+
     body {{
       margin: 0;
-      color: var(--ink);
-      font-family: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
-      background:
-        radial-gradient(circle at top, rgba(255, 247, 225, 0.95), rgba(247, 240, 223, 0.96) 38%, rgba(236, 225, 197, 0.98) 100%),
-        linear-gradient(135deg, rgba(184, 132, 50, 0.06), transparent 30%),
-        linear-gradient(45deg, rgba(45, 112, 117, 0.05), transparent 34%);
       min-height: 100vh;
+      color: var(--ink);
+      font-family: "Avenir Next", "Inter", "Gill Sans", "Trebuchet MS", sans-serif;
+      background:
+        linear-gradient(90deg, rgba(214, 168, 79, 0.04) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(86, 214, 201, 0.035) 1px, transparent 1px),
+        linear-gradient(135deg, #07080b 0%, #11161e 48%, #15100c 100%);
+      background-size: 56px 56px, 56px 56px, auto;
     }}
 
     body::before {{
@@ -1672,122 +1683,299 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       inset: 0;
       pointer-events: none;
       background-image:
-        radial-gradient(circle at 10% 18%, rgba(184, 132, 50, 0.22) 0 2px, transparent 3px),
-        radial-gradient(circle at 84% 14%, rgba(45, 112, 117, 0.18) 0 1.5px, transparent 2.5px),
-        radial-gradient(circle at 70% 30%, rgba(184, 132, 50, 0.16) 0 1.5px, transparent 2.5px),
-        linear-gradient(transparent 0, rgba(255,255,255,0.2) 50%, transparent 100%);
-      opacity: 0.7;
+        linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        radial-gradient(circle at 18% 22%, rgba(244, 239, 225, 0.18) 0 1px, transparent 1.5px),
+        radial-gradient(circle at 68% 16%, rgba(86, 214, 201, 0.28) 0 1px, transparent 1.5px),
+        radial-gradient(circle at 82% 74%, rgba(214, 168, 79, 0.24) 0 1px, transparent 1.5px);
+      background-size: 100% 4px, 220px 220px, 300px 300px, 260px 260px;
+      opacity: 0.55;
+      mix-blend-mode: screen;
+    }}
+
+    body::after {{
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(90deg, rgba(7, 8, 11, 0.82), transparent 16%, transparent 84%, rgba(7, 8, 11, 0.72)),
+        linear-gradient(180deg, rgba(7, 8, 11, 0.1), rgba(7, 8, 11, 0.72));
     }}
 
     .shell {{
-      width: min(1400px, calc(100vw - 32px));
-      margin: 24px auto 48px;
+      width: min(1440px, calc(100vw - 32px));
+      margin: 24px auto 52px;
       position: relative;
       z-index: 1;
     }}
 
     .hero {{
-      padding: 28px 30px 24px;
-      border: 1px solid rgba(184, 132, 50, 0.28);
-      background: linear-gradient(180deg, rgba(255, 251, 240, 0.94), rgba(248, 241, 224, 0.84));
+      min-height: 430px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.62fr);
+      gap: 28px;
+      align-items: stretch;
+      padding: 34px;
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(135deg, rgba(15, 19, 27, 0.94), rgba(9, 11, 15, 0.86) 52%, rgba(37, 28, 17, 0.72)),
+        linear-gradient(90deg, rgba(214, 168, 79, 0.13), transparent 36%),
+        linear-gradient(180deg, transparent, rgba(86, 214, 201, 0.07));
       box-shadow: var(--shadow);
       position: relative;
       overflow: hidden;
     }}
 
-    .hero::before,
-    .hero::after {{
+    .hero::before {{
       content: "";
       position: absolute;
-      inset: 10px;
-      border: 1px solid rgba(184, 132, 50, 0.18);
+      inset: 12px;
+      border: 1px solid rgba(244, 239, 225, 0.08);
       pointer-events: none;
     }}
 
     .hero::after {{
-      inset: 20px;
-      clip-path: polygon(4% 0, 96% 0, 100% 12%, 100% 88%, 96% 100%, 4% 100%, 0 88%, 0 12%);
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(115deg, rgba(214, 168, 79, 0.11) 0 1px, transparent 1px 28%),
+        linear-gradient(90deg, transparent 0 68%, rgba(7, 8, 11, 0.42) 68% 100%);
+    }}
+
+    .hero-copy,
+    .hero-art {{
+      position: relative;
+      z-index: 1;
+    }}
+
+    .hero-copy {{
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 22px;
     }}
 
     .eyebrow {{
-      letter-spacing: 0.32em;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      letter-spacing: 0.28em;
       text-transform: uppercase;
-      font-size: 0.78rem;
+      font-size: 0.74rem;
       color: var(--gold);
-      margin-bottom: 10px;
+      margin-bottom: 14px;
+    }}
+
+    .eyebrow::before {{
+      content: "";
+      width: 42px;
+      height: 1px;
+      background: var(--gold);
     }}
 
     h1 {{
+      max-width: 900px;
       margin: 0;
-      font-size: clamp(2rem, 3vw, 3.4rem);
-      line-height: 1;
-      font-family: "Baskerville", "Times New Roman", serif;
-      letter-spacing: 0.04em;
+      font-size: clamp(3rem, 7vw, 7.4rem);
+      line-height: 0.88;
+      font-family: "Didot", "Baskerville", "Times New Roman", serif;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
     }}
 
     .subtitle {{
-      margin: 12px 0 0;
-      max-width: 820px;
-      color: var(--muted);
-      font-size: 1rem;
-      line-height: 1.6;
+      margin: 18px 0 0;
+      max-width: 780px;
+      color: #c6cfde;
+      font-size: clamp(1rem, 1.45vw, 1.2rem);
+      line-height: 1.64;
     }}
 
     .hero-meta {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(120px, 1fr)) minmax(230px, 1.35fr);
+      gap: 1px;
+      border: 1px solid rgba(244, 239, 225, 0.11);
+      background: rgba(244, 239, 225, 0.08);
     }}
 
     .hero-meta span,
     .pill {{
-      border: 1px solid rgba(31, 46, 56, 0.14);
-      background: rgba(255, 255, 255, 0.55);
-      padding: 8px 12px;
-      font-size: 0.84rem;
-      letter-spacing: 0.04em;
+      min-height: 54px;
+      display: flex;
+      align-items: center;
+      border: 0;
+      background: rgba(7, 8, 11, 0.52);
+      padding: 12px 14px;
+      color: #e6ddc8;
+      font-size: 0.76rem;
+      letter-spacing: 0.09em;
       text-transform: uppercase;
     }}
 
+    .hero-meta span:last-child {{
+      overflow-wrap: anywhere;
+    }}
+
+    .hero-art {{
+      display: grid;
+      min-height: 360px;
+      grid-template-rows: 1fr auto;
+      gap: 16px;
+    }}
+
+    .radar-plate {{
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line-cool);
+      background:
+        linear-gradient(rgba(86, 214, 201, 0.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(86, 214, 201, 0.07) 1px, transparent 1px),
+        radial-gradient(circle at center, rgba(86, 214, 201, 0.14), transparent 58%),
+        rgba(6, 13, 17, 0.82);
+      background-size: 34px 34px, 34px 34px, auto, auto;
+      min-height: 280px;
+    }}
+
+    .radar-plate::before {{
+      content: "";
+      position: absolute;
+      inset: 10%;
+      border-radius: 50%;
+      border: 1px solid rgba(86, 214, 201, 0.28);
+      box-shadow:
+        0 0 0 58px rgba(86, 214, 201, 0.035),
+        0 0 0 112px rgba(86, 214, 201, 0.025),
+        inset 0 0 42px rgba(86, 214, 201, 0.1);
+    }}
+
+    .radar-plate::after {{
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: conic-gradient(from -18deg at 52% 51%, rgba(86, 214, 201, 0.36), rgba(86, 214, 201, 0.02) 42deg, transparent 82deg);
+      mix-blend-mode: screen;
+      opacity: 0.9;
+    }}
+
+    .uap-mark {{
+      position: absolute;
+      left: 54%;
+      top: 42%;
+      width: 92px;
+      height: 22px;
+      transform: translate(-50%, -50%) rotate(-8deg);
+      border: 1px solid rgba(244, 239, 225, 0.78);
+      border-radius: 50%;
+      background: linear-gradient(90deg, transparent, rgba(244, 239, 225, 0.34), transparent);
+      box-shadow: 0 0 24px rgba(86, 214, 201, 0.34);
+    }}
+
+    .uap-mark::before,
+    .uap-mark::after {{
+      content: "";
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(244, 239, 225, 0.72);
+    }}
+
+    .uap-mark::before {{
+      top: 8px;
+      width: 118px;
+      height: 1px;
+    }}
+
+    .uap-mark::after {{
+      top: 50%;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      box-shadow: -116px 70px 0 rgba(214, 168, 79, 0.82), 88px -66px 0 rgba(86, 214, 201, 0.9);
+    }}
+
+    .plate-caption {{
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      color: var(--teal);
+      font-size: 0.72rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }}
+
+    .archive-strip {{
+      display: grid;
+      gap: 8px;
+      padding: 14px;
+      border: 1px solid rgba(214, 168, 79, 0.18);
+      background: rgba(11, 10, 10, 0.68);
+    }}
+
+    .redaction-line {{
+      height: 10px;
+      background: linear-gradient(90deg, rgba(244, 239, 225, 0.72) 0 21%, rgba(7, 8, 11, 0.94) 21% 58%, rgba(244, 239, 225, 0.38) 58% 74%, rgba(7, 8, 11, 0.94) 74% 100%);
+    }}
+
+    .redaction-line:nth-child(2) {{
+      width: 84%;
+      background: linear-gradient(90deg, rgba(214, 168, 79, 0.58) 0 18%, rgba(7, 8, 11, 0.94) 18% 47%, rgba(244, 239, 225, 0.32) 47% 100%);
+    }}
+
+    .redaction-line:nth-child(3) {{
+      width: 64%;
+      background: linear-gradient(90deg, rgba(244, 239, 225, 0.38) 0 30%, rgba(7, 8, 11, 0.94) 30% 80%, rgba(86, 214, 201, 0.56) 80% 100%);
+    }}
+
     .tab-strip {{
-      margin-top: 18px;
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      margin-top: 14px;
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 0;
+      border: 1px solid rgba(244, 239, 225, 0.1);
+      background: rgba(7, 8, 11, 0.78);
+      backdrop-filter: blur(18px);
     }}
 
     .tab-button {{
       appearance: none;
-      border: 1px solid rgba(31, 46, 56, 0.14);
-      background: rgba(255, 255, 255, 0.55);
+      border: 0;
+      border-right: 1px solid rgba(244, 239, 225, 0.1);
+      background: transparent;
       color: var(--muted);
-      padding: 11px 16px;
+      padding: 14px 18px;
       font: inherit;
-      font-size: 0.82rem;
-      letter-spacing: 0.14em;
+      font-size: 0.76rem;
+      letter-spacing: 0.18em;
       text-transform: uppercase;
       cursor: pointer;
-      transition: background 140ms ease, color 140ms ease, border-color 140ms ease, transform 140ms ease;
+      transition: background 140ms ease, color 140ms ease;
     }}
 
     .tab-button:hover,
     .tab-button:focus-visible {{
       outline: none;
-      border-color: rgba(184, 132, 50, 0.44);
+      background: rgba(86, 214, 201, 0.08);
       color: var(--ink);
-      transform: translateY(-1px);
     }}
 
     .tab-button[aria-selected="true"] {{
-      background: linear-gradient(180deg, rgba(184, 132, 50, 0.2), rgba(255, 251, 240, 0.92));
-      border-color: rgba(184, 132, 50, 0.44);
-      color: var(--ink);
+      background: rgba(214, 168, 79, 0.16);
+      color: var(--gold);
     }}
 
-    .tab-panel[hidden] {{
-      display: none;
-    }}
+    .tab-panel[hidden] {{ display: none; }}
 
     .tab-panel > .grid,
     .tab-panel > .filters,
@@ -1830,8 +2018,8 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     .pagination-button {{
       appearance: none;
       min-width: 42px;
-      border: 1px solid rgba(31, 46, 56, 0.14);
-      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(244, 239, 225, 0.12);
+      background: rgba(244, 239, 225, 0.06);
       color: var(--ink);
       padding: 8px 12px;
       font: inherit;
@@ -1843,26 +2031,26 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     .pagination-button:hover,
     .pagination-button:focus-visible {{
       outline: none;
-      border-color: rgba(184, 132, 50, 0.44);
-      background: rgba(255, 251, 240, 0.95);
+      border-color: rgba(86, 214, 201, 0.48);
+      background: rgba(86, 214, 201, 0.1);
     }}
 
     .pagination-button[aria-current="page"] {{
-      background: rgba(45, 112, 117, 0.16);
-      border-color: rgba(45, 112, 117, 0.28);
-      color: #154246;
+      background: rgba(214, 168, 79, 0.18);
+      border-color: rgba(214, 168, 79, 0.42);
+      color: var(--gold);
     }}
 
     .pagination-button:disabled {{
       cursor: default;
-      opacity: 0.45;
+      opacity: 0.42;
     }}
 
     .filters,
     .panel {{
       margin-top: 18px;
       background: var(--panel);
-      border: 1px solid rgba(31, 46, 56, 0.1);
+      border: 1px solid rgba(244, 239, 225, 0.1);
       box-shadow: var(--shadow);
     }}
 
@@ -1872,13 +2060,16 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 14px;
       align-items: end;
+      background:
+        linear-gradient(90deg, rgba(86, 214, 201, 0.08), transparent 45%),
+        var(--panel-deep);
     }}
 
     label {{
       display: grid;
-      gap: 6px;
-      font-size: 0.8rem;
-      letter-spacing: 0.12em;
+      gap: 7px;
+      font-size: 0.74rem;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--muted);
     }}
@@ -1886,11 +2077,18 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     input,
     select {{
       width: 100%;
-      border: 1px solid rgba(31, 46, 56, 0.16);
-      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(244, 239, 225, 0.14);
+      background: rgba(7, 8, 11, 0.62);
       color: var(--ink);
       padding: 11px 12px;
       font: inherit;
+      color-scheme: dark;
+    }}
+
+    input:focus,
+    select:focus {{
+      outline: 1px solid rgba(86, 214, 201, 0.7);
+      border-color: rgba(86, 214, 201, 0.7);
     }}
 
     .grid {{
@@ -1898,6 +2096,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       display: grid;
       grid-template-columns: repeat(12, 1fr);
       gap: 18px;
+      counter-reset: dashboard-panel;
     }}
 
     .span-12 {{ grid-column: span 12; }}
@@ -1906,67 +2105,117 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     .span-4 {{ grid-column: span 4; }}
 
     .panel {{
-      padding: 18px;
+      position: relative;
+      padding: 19px;
       overflow: hidden;
     }}
 
+    .panel::before {{
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border-top: 2px solid rgba(214, 168, 79, 0.54);
+      background:
+        linear-gradient(90deg, rgba(244, 239, 225, 0.045) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(244, 239, 225, 0.03) 1px, transparent 1px);
+      background-size: 28px 28px;
+      opacity: 0.42;
+    }}
+
+    .panel > * {{
+      position: relative;
+      z-index: 1;
+    }}
+
     .panel h2 {{
-      margin: 0 0 14px;
-      font-size: 0.96rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 16px;
+      font-size: 0.82rem;
       letter-spacing: 0.18em;
       text-transform: uppercase;
-      color: var(--muted);
+      color: #d7dfec;
+    }}
+
+    .grid .panel h2::before {{
+      counter-increment: dashboard-panel;
+      content: counter(dashboard-panel, decimal-leading-zero);
+      color: var(--gold);
+      font-family: "Didot", "Baskerville", serif;
+      font-size: 1.08rem;
+      letter-spacing: 0;
     }}
 
     .metrics {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+      gap: 1px;
+      border: 1px solid rgba(244, 239, 225, 0.08);
+      background: rgba(244, 239, 225, 0.08);
     }}
 
     .metric {{
-      padding: 14px;
-      border: 1px solid rgba(184, 132, 50, 0.18);
-      background: linear-gradient(180deg, rgba(255,255,255,0.82), rgba(247, 240, 223, 0.85));
+      min-height: 122px;
+      padding: 16px;
+      background:
+        linear-gradient(180deg, rgba(244, 239, 225, 0.055), rgba(244, 239, 225, 0.02)),
+        rgba(7, 8, 11, 0.58);
     }}
 
     .metric .value {{
-      font-family: "Baskerville", serif;
-      font-size: 2rem;
+      font-family: "Didot", "Baskerville", serif;
+      font-size: clamp(2rem, 4vw, 3.2rem);
       color: var(--teal);
-      line-height: 1;
+      line-height: 0.95;
     }}
 
     .metric .label {{
-      margin-top: 8px;
-      font-size: 0.82rem;
-      letter-spacing: 0.1em;
+      margin-top: 12px;
+      font-size: 0.74rem;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--muted);
     }}
 
     .executive-summary {{
-      display: grid;
-      gap: 14px;
-      max-width: 1120px;
+      columns: 2 360px;
+      column-gap: 34px;
+      max-width: 1220px;
     }}
 
     .executive-summary p {{
-      margin: 0;
-      color: var(--ink);
-      font-size: 1rem;
-      line-height: 1.72;
+      margin: 0 0 16px;
+      break-inside: avoid;
+      color: #d9deea;
+      font-family: "Iowan Old Style", "Baskerville", "Times New Roman", serif;
+      font-size: 1.08rem;
+      line-height: 1.78;
+    }}
+
+    .executive-summary p:first-child::first-letter {{
+      float: left;
+      margin: 8px 10px 0 0;
+      color: var(--gold);
+      font-size: 4.3rem;
+      line-height: 0.78;
+      font-family: "Didot", "Baskerville", serif;
     }}
 
     .executive-summary-meta {{
+      display: inline-block;
       margin-top: 2px;
-      color: var(--muted);
-      font-size: 0.8rem;
-      letter-spacing: 0.1em;
+      color: var(--dim);
+      font-size: 0.72rem;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
     }}
 
-    .svg-wrap {{ min-height: 280px; }}
+    .svg-wrap {{
+      min-height: 280px;
+      color: var(--ink);
+    }}
 
     .chart-note,
     .muted {{ color: var(--muted); }}
@@ -1982,23 +2231,28 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
 
     .theme-chip,
     .keyword {{
-      border: 1px solid rgba(45, 112, 117, 0.18);
-      background: var(--teal-soft);
-      padding: 9px 11px;
+      border: 1px solid rgba(86, 214, 201, 0.18);
+      background: rgba(86, 214, 201, 0.08);
+      padding: 10px 12px;
+    }}
+
+    .theme-chip strong {{
+      color: var(--ink);
     }}
 
     .signal {{
       width: 100%;
-      padding: 12px 14px;
-      border-left: 3px solid var(--gold);
-      background: rgba(255, 255, 255, 0.56);
-      line-height: 1.5;
+      padding: 13px 15px;
+      border-left: 3px solid var(--red);
+      background: rgba(7, 8, 11, 0.46);
+      color: #d9deea;
+      line-height: 1.55;
     }}
 
     .keyword {{
       font-size: calc(0.78rem + var(--scale, 0) * 0.5rem);
-      background: rgba(184, 132, 50, 0.1);
-      border-color: rgba(184, 132, 50, 0.22);
+      background: rgba(214, 168, 79, 0.1);
+      border-color: rgba(214, 168, 79, 0.22);
     }}
 
     .hotspot {{
@@ -2006,8 +2260,13 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       display: flex;
       justify-content: space-between;
       gap: 12px;
-      border-bottom: 1px solid var(--line);
-      padding: 10px 0;
+      border-bottom: 1px solid rgba(244, 239, 225, 0.1);
+      padding: 11px 0;
+      color: #dde5ef;
+    }}
+
+    .hotspot strong {{
+      color: var(--gold);
     }}
 
     table {{
@@ -2019,19 +2278,29 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     th,
     td {{
       text-align: left;
-      padding: 12px 10px;
-      border-bottom: 1px solid var(--line);
+      padding: 14px 12px;
+      border-bottom: 1px solid rgba(244, 239, 225, 0.1);
       vertical-align: top;
     }}
 
+    tr:hover td {{
+      background: rgba(86, 214, 201, 0.04);
+    }}
+
     th {{
-      letter-spacing: 0.12em;
+      letter-spacing: 0.13em;
       text-transform: uppercase;
-      font-size: 0.72rem;
-      color: var(--muted);
+      font-size: 0.7rem;
+      color: var(--gold);
       position: sticky;
-      top: 0;
-      background: rgba(247, 240, 223, 0.96);
+      top: 47px;
+      background: rgba(10, 13, 18, 0.98);
+      z-index: 2;
+    }}
+
+    td {{
+      color: #d6dce7;
+      line-height: 1.55;
     }}
 
     .doc-title {{
@@ -2043,50 +2312,60 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     .doc-title a {{
       color: var(--ink);
       text-decoration: none;
-      border-bottom: 1px solid rgba(31, 46, 56, 0.18);
+      border-bottom: 1px solid rgba(214, 168, 79, 0.42);
+    }}
+
+    .doc-title a:hover,
+    .doc-title a:focus-visible {{
+      color: var(--teal);
+      outline: none;
+      border-bottom-color: var(--teal);
     }}
 
     .tag-row {{
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
-      margin-top: 8px;
+      margin-top: 9px;
     }}
 
     .tag {{
-      background: rgba(45, 112, 117, 0.08);
-      border: 1px solid rgba(45, 112, 117, 0.16);
+      background: rgba(86, 214, 201, 0.08);
+      border: 1px solid rgba(86, 214, 201, 0.16);
+      color: #c8d6e3;
       padding: 4px 8px;
-      font-size: 0.78rem;
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
     }}
 
     .classification-badge {{
       display: inline-flex;
       align-items: center;
       padding: 6px 10px;
-      border: 1px solid rgba(31, 46, 56, 0.18);
-      font-size: 0.78rem;
-      letter-spacing: 0.08em;
+      border: 1px solid rgba(244, 239, 225, 0.18);
+      font-size: 0.74rem;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
-      background: rgba(255, 255, 255, 0.82);
+      background: rgba(244, 239, 225, 0.08);
+      color: var(--ink);
     }}
 
     .classification-badge.category-one {{
-      background: rgba(184, 132, 50, 0.18);
-      border-color: rgba(184, 132, 50, 0.32);
-      color: #6b4613;
+      background: rgba(200, 78, 83, 0.18);
+      border-color: rgba(200, 78, 83, 0.44);
+      color: #f0b1b5;
     }}
 
     .classification-badge.category-two {{
-      background: rgba(45, 112, 117, 0.12);
-      border-color: rgba(45, 112, 117, 0.28);
-      color: #1f5960;
+      background: rgba(214, 168, 79, 0.14);
+      border-color: rgba(214, 168, 79, 0.34);
+      color: #efd38b;
     }}
 
     .classification-badge.category-three {{
-      background: rgba(31, 46, 56, 0.08);
-      border-color: rgba(31, 46, 56, 0.16);
-      color: #46535b;
+      background: rgba(86, 214, 201, 0.1);
+      border-color: rgba(86, 214, 201, 0.26);
+      color: #b7f2ed;
     }}
 
     .classification-cell strong {{
@@ -2095,10 +2374,10 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     }}
 
     .classification-note {{
-      margin-top: 10px;
-      font-size: 0.82rem;
+      margin-top: 12px;
+      font-size: 0.83rem;
       color: var(--muted);
-      line-height: 1.55;
+      line-height: 1.58;
     }}
 
     .table-wrap {{
@@ -2112,30 +2391,96 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     }}
 
     @media (max-width: 1120px) {{
+      .hero {{
+        grid-template-columns: 1fr;
+      }}
+
+      .hero-art {{
+        min-height: 280px;
+      }}
+
       .span-8,
       .span-6,
       .span-4 {{ grid-column: span 12; }}
     }}
 
-    @media (max-width: 640px) {{
-      .shell {{ width: min(100vw - 18px, 100%); margin-top: 10px; }}
-      .hero {{ padding: 22px 18px 18px; }}
-      .panel {{ padding: 14px; }}
-      th:nth-child(4), td:nth-child(4) {{ display: none; }}
+    @media (max-width: 720px) {{
+      .shell {{
+        width: min(100vw - 18px, 100%);
+        margin-top: 10px;
+      }}
+
+      .hero {{
+        min-height: auto;
+        padding: 22px 18px 18px;
+      }}
+
+      h1 {{
+        font-size: clamp(2.4rem, 16vw, 4.6rem);
+      }}
+
+      .hero-meta {{
+        grid-template-columns: 1fr 1fr;
+      }}
+
+      .tab-strip {{
+        position: static;
+      }}
+
+      .tab-button {{
+        flex: 1 1 50%;
+        border-bottom: 1px solid rgba(244, 239, 225, 0.1);
+      }}
+
+      .panel {{
+        padding: 14px;
+      }}
+
+      .documents-summary {{
+        align-items: flex-start;
+        flex-direction: column;
+      }}
+
+      th:nth-child(4),
+      td:nth-child(4) {{ display: none; }}
+    }}
+
+    @media (max-width: 500px) {{
+      .hero-meta {{
+        grid-template-columns: 1fr;
+      }}
     }}
   </style>
 </head>
 <body>
   <div class=\"shell\">
-  <title>UAP/UFO Research</title>
-      <div class=\"eyebrow\">Research Dashboard</div>
-      <h1>UAP/UFO Research</h1>
-  <p class="subtitle">This dashboard organizes the public war.gov/ufo archive of unresolved UAP records released by the Department of War with ODNI support. The collection spans decades of historical government files, many reviewed from paper records, and the cases remain unresolved because the government has not made a definitive determination about the observed phenomena.</p>
-      <div class=\"hero-meta\">
-        <span id=\"metaDocs\"></span>
-        <span id=\"metaPages\"></span>
-        <span id=\"metaYears\"></span>
-        <span id=\"metaGenerated\"></span>
+    <section class=\"hero\">
+      <div class=\"hero-copy\">
+        <div>
+          <div class=\"eyebrow\">Research Dashboard</div>
+          <h1>UAP/UFO Research</h1>
+          <p class="subtitle">This dashboard organizes the public war.gov/ufo archive of unresolved UAP records released by the Department of War with ODNI support. The collection spans decades of historical government files, many reviewed from paper records, and the cases remain unresolved because the government has not made a definitive determination about the observed phenomena.</p>
+        </div>
+        <div class=\"hero-meta\">
+          <span id=\"metaDocs\"></span>
+          <span id=\"metaPages\"></span>
+          <span id=\"metaYears\"></span>
+          <span id=\"metaGenerated\"></span>
+        </div>
+      </div>
+      <div class=\"hero-art\" aria-hidden=\"true\">
+        <div class=\"radar-plate\">
+          <div class=\"uap-mark\"></div>
+          <div class=\"plate-caption\">
+            <span>Sensor stack</span>
+            <span>Archive signal</span>
+          </div>
+        </div>
+        <div class=\"archive-strip\">
+          <div class=\"redaction-line\"></div>
+          <div class=\"redaction-line\"></div>
+          <div class=\"redaction-line\"></div>
+        </div>
       </div>
     </section>
 
@@ -2271,6 +2616,19 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       yearMin: analysis.year_min || 1900,
       yearMax: analysis.year_max || new Date().getFullYear(),
     };
+    const chartColors = {
+      ink: '#f4efe1',
+      muted: '#9aa5b8',
+      dim: '#667085',
+      gold: '#d6a84f',
+      teal: '#56d6c9',
+      red: '#c84e53',
+      green: '#9bb46e',
+      blue: '#7d9cff',
+      grid: 'rgba(244,239,225,0.12)',
+      land: 'rgba(214,168,79,0.16)',
+      mapPanel: 'rgba(6,13,17,0.72)',
+    };
 
     function escapeHtml(value) {
       return String(value ?? '')
@@ -2397,9 +2755,9 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           const y = margin.top + index * barHeight + 7;
           const barWidth = (entry.count / maxCount) * plotWidth;
           return `
-            <text x="${margin.left - 12}" y="${y + 14}" text-anchor="end" font-size="12" fill="#56636b">${escapeHtml(entry.label)}</text>
+            <text x="${margin.left - 12}" y="${y + 14}" text-anchor="end" font-size="12" fill="${chartColors.muted}">${escapeHtml(entry.label)}</text>
             <rect x="${margin.left}" y="${y}" width="${barWidth}" height="20" fill="${color}" opacity="0.82"></rect>
-            <text x="${margin.left + barWidth + 8}" y="${y + 14}" font-size="12" fill="#1f2e38">${entry.count}</text>`;
+            <text x="${margin.left + barWidth + 8}" y="${y + 14}" font-size="12" fill="${chartColors.ink}">${entry.count}</text>`;
         }).join('');
         node.innerHTML = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img">${bars}</svg>`;
         return;
@@ -2413,15 +2771,15 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         const showLabel = entries.length <= 24 || index % Math.ceil(entries.length / 12) === 0;
         return `
           <rect x="${x}" y="${y}" width="${Math.max(barWidth - 12, 6)}" height="${h}" fill="${color}" opacity="0.86"></rect>
-          <text x="${x + Math.max(barWidth - 12, 6) / 2}" y="${margin.top + plotHeight + 18}" text-anchor="middle" font-size="11" fill="#56636b">${showLabel ? escapeHtml(entry.label) : ''}</text>`;
+          <text x="${x + Math.max(barWidth - 12, 6) / 2}" y="${margin.top + plotHeight + 18}" text-anchor="middle" font-size="11" fill="${chartColors.muted}">${showLabel ? escapeHtml(entry.label) : ''}</text>`;
       }).join('');
 
       const grid = Array.from({ length: 5 }, (_, index) => {
         const value = Math.round((maxCount / 4) * index);
         const y = margin.top + plotHeight - (plotHeight * index / 4);
         return `
-          <line x1="${margin.left}" x2="${width - margin.right}" y1="${y}" y2="${y}" stroke="rgba(31,46,56,0.1)"></line>
-          <text x="${margin.left - 10}" y="${y + 4}" text-anchor="end" font-size="11" fill="#56636b">${value}</text>`;
+          <line x1="${margin.left}" x2="${width - margin.right}" y1="${y}" y2="${y}" stroke="${chartColors.grid}"></line>
+          <text x="${margin.left - 10}" y="${y + 4}" text-anchor="end" font-size="11" fill="${chartColors.muted}">${value}</text>`;
       }).join('');
       node.innerHTML = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img">${grid}${bars}</svg>`;
     }
@@ -2469,15 +2827,15 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       const maxCount = Math.max(...clusters.map((cluster) => cluster.count), 1);
       const graticule = Array.from({ length: 7 }, (_, index) => {
         const y = 20 + ((height - 40) / 6) * index;
-        return `<line x1="20" x2="${width - 20}" y1="${y}" y2="${y}" stroke="rgba(31,46,56,0.08)"></line>`;
+        return `<line x1="20" x2="${width - 20}" y1="${y}" y2="${y}" stroke="${chartColors.grid}"></line>`;
       }).join('') + Array.from({ length: 7 }, (_, index) => {
         const x = 20 + ((width - 40) / 6) * index;
-        return `<line x1="${x}" x2="${x}" y1="20" y2="${height - 20}" stroke="rgba(31,46,56,0.08)"></line>`;
+        return `<line x1="${x}" x2="${x}" y1="20" y2="${height - 20}" stroke="${chartColors.grid}"></line>`;
       }).join('');
       const landLayer = (worldLand.geometries || []).map((geometry) => {
         const path = geometryToPath(geometry);
         if (!path) return '';
-        return `<path d="${path}" fill="rgba(184,132,50,0.2)" stroke="rgba(31,46,56,0.24)" stroke-width="0.8" vector-effect="non-scaling-stroke"></path>`;
+        return `<path d="${path}" fill="${chartColors.land}" stroke="rgba(244,239,225,0.22)" stroke-width="0.8" vector-effect="non-scaling-stroke"></path>`;
       }).join('');
       const axisLabels = [
         { text: '180°W', x: projectX(-180), y: height - 8, anchor: 'start' },
@@ -2492,8 +2850,8 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         { text: '0°', x: 24, y: projectY(0) - 4, anchor: 'start' },
         { text: '30°S', x: 24, y: projectY(-30) - 4, anchor: 'start' },
         { text: '60°S', x: 24, y: projectY(-60) - 4, anchor: 'start' },
-      ].map((label) => `<text x="${label.x}" y="${label.y}" text-anchor="${label.anchor}" font-size="11" fill="#56636b">${label.text}</text>`).join('');
-      const regionLayer = regionLabels.map((label) => `<text x="${projectX(label.lon)}" y="${projectY(label.lat)}" text-anchor="middle" font-size="11" fill="rgba(31,46,56,0.5)">${escapeHtml(label.text)}</text>`).join('');
+      ].map((label) => `<text x="${label.x}" y="${label.y}" text-anchor="${label.anchor}" font-size="11" fill="${chartColors.muted}">${label.text}</text>`).join('');
+      const regionLayer = regionLabels.map((label) => `<text x="${projectX(label.lon)}" y="${projectY(label.lat)}" text-anchor="middle" font-size="11" fill="rgba(214,168,79,0.58)">${escapeHtml(label.text)}</text>`).join('');
 
       const placedLabels = [];
       const bubbles = clusters.map((cluster) => {
@@ -2507,24 +2865,24 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         }
         const title = `${cluster.label} (${cluster.count})`;
         return `
-          <circle cx="${x}" cy="${y}" r="${radius}" fill="rgba(45,112,117,0.22)" stroke="#2d7075" stroke-width="1.6">
+          <circle cx="${x}" cy="${y}" r="${radius}" fill="rgba(86,214,201,0.16)" stroke="${chartColors.teal}" stroke-width="1.6">
             <title>${escapeHtml(title)}</title>
           </circle>
-          <circle cx="${x}" cy="${y}" r="2.5" fill="#b88432">
+          <circle cx="${x}" cy="${y}" r="2.5" fill="${chartColors.gold}">
             <title>${escapeHtml(title)}</title>
           </circle>
-          ${canPlaceLabel ? `<text x="${x}" y="${labelY}" text-anchor="middle" font-size="11" fill="#1f2e38">${escapeHtml(title)}</text>` : ''}`;
+          ${canPlaceLabel ? `<text x="${x}" y="${labelY}" text-anchor="middle" font-size="11" fill="${chartColors.ink}">${escapeHtml(title)}</text>` : ''}`;
       }).join('');
 
       node.innerHTML = `
         <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img">
-          <rect x="20" y="20" width="${width - 40}" height="${height - 40}" fill="rgba(219,236,236,0.42)" stroke="rgba(184,132,50,0.28)"></rect>
+          <rect x="20" y="20" width="${width - 40}" height="${height - 40}" fill="${chartColors.mapPanel}" stroke="rgba(214,168,79,0.34)"></rect>
           ${graticule}
           ${landLayer}
           ${regionLayer}
           ${bubbles}
           ${axisLabels}
-          <text x="24" y="34" font-size="12" fill="#56636b">World Reference Map</text>
+          <text x="24" y="34" font-size="12" fill="${chartColors.muted}">World Reference Map</text>
         </svg>`;
     }
 
@@ -2562,7 +2920,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       )
         .sort((a, b) => b.count - a.count)
         .slice(0, 12);
-      renderBarChart('organizationChart', organizations, '#7a9e45', true);
+      renderBarChart('organizationChart', organizations, chartColors.green, true);
     }
 
     function renderClassifications(items) {
@@ -2573,7 +2931,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           count: items.filter((doc) => doc.evidence_category === entry.label).length,
         }))
         .sort((a, b) => a.rank - b.rank);
-      renderBarChart('classificationChart', categories, '#8b5e28', true);
+      renderBarChart('classificationChart', categories, chartColors.red, true);
     }
 
     function renderHotspots(items) {
@@ -2720,8 +3078,8 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       const types = countBy(analysisItems, (doc) => doc.document_type).sort((a, b) => b.count - a.count).slice(0, 12);
       renderMetrics(analysisItems);
       renderExecutiveSummary();
-      renderBarChart('timelineChart', yearly, '#2d7075', false);
-      renderBarChart('typeChart', types, '#b88432', true);
+      renderBarChart('timelineChart', yearly, chartColors.teal, false);
+      renderBarChart('typeChart', types, chartColors.gold, true);
       renderMap(analysisItems);
       renderSignals(analysisItems);
       renderThemes(analysisItems);
