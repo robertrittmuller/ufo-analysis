@@ -3,3 +3,4 @@ pytesseract
 Pillow
 python-dateutil
 geonamescache
+curl_cffi

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import json
 import sys
 from pathlib import Path
 
@@ -16,17 +17,25 @@ except ImportError:  # pragma: no cover - depends on local environment
 
 START_URL = "https://www.war.gov/ufo/"
 CSV_URL = "https://www.war.gov/Portals/1/Interactive/2026/UFO/uap-csv.csv"
+SOURCE_MANIFEST_VERSION = 1
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Download UFO PDF reports from war.gov into data/sources.",
     )
+    repo_root = Path(__file__).resolve().parents[1]
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "data" / "sources",
+        default=repo_root / "data" / "sources",
         help="Directory where the PDFs should be saved.",
+    )
+    parser.add_argument(
+        "--source-manifest",
+        type=Path,
+        default=repo_root / "data" / "processed" / "source_manifest.json",
+        help="JSON manifest file that stores the original source URL for each downloaded PDF.",
     )
     parser.add_argument(
         "--max-files",
@@ -99,11 +108,15 @@ def fetch_csv_text(session) -> str:
 def iter_pdf_records(csv_text: str) -> list[dict[str, str]]:
     reader = csv.DictReader(io.StringIO(csv_text))
     records: list[dict[str, str]] = []
+    seen_pdf_urls: set[str] = set()
     for row in reader:
         file_type = (row.get("Type") or "").strip().lower()
         pdf_url = (row.get("PDF | Image Link") or "").strip()
         if file_type != "pdf" or not pdf_url.lower().endswith(".pdf"):
             continue
+        if pdf_url in seen_pdf_urls:
+            continue
+        seen_pdf_urls.add(pdf_url)
         records.append(row)
     return records
 
@@ -118,6 +131,16 @@ def download_pdf(session, pdf_url: str, destination: Path) -> None:
                     handle.write(chunk)
     finally:
         response.close()
+
+
+def write_source_manifest(path: Path, records: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "manifest_version": SOURCE_MANIFEST_VERSION,
+        "generated_from": CSV_URL,
+        "documents": records,
+    }
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def main() -> int:
@@ -138,6 +161,7 @@ def main() -> int:
             return 1
 
         used_names: set[str] = set()
+        manifest_records: list[dict[str, str]] = []
         for record in records:
             title = (record.get("Title") or "").strip().strip('"')
             pdf_url = (record.get("PDF | Image Link") or "").strip()
@@ -145,6 +169,15 @@ def main() -> int:
             destination = args.output_dir / filename
             print(f"Downloading {pdf_url} -> {destination}")
             download_pdf(session, pdf_url, destination)
+            manifest_records.append(
+                {
+                    "filename": filename,
+                    "title": title,
+                    "original_source_url": pdf_url,
+                }
+            )
+
+        write_source_manifest(args.source_manifest, manifest_records)
 
         print(f"Downloaded {len(records)} PDF files into {args.output_dir}")
         return 0
