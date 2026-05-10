@@ -27,6 +27,15 @@ from dateutil import parser as date_parser
 from PIL import Image
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SOURCE_DIR = REPO_ROOT / "data" / "sources"
+DEFAULT_OUTPUT_HTML = REPO_ROOT / "dashboard" / "index.html"
+DEFAULT_OUTPUT_JSON = REPO_ROOT / "data" / "processed" / "ufo_dashboard_analysis.json"
+DEFAULT_DOCUMENT_CACHE_DIR = REPO_ROOT / "data" / "processed" / "documents"
+DEFAULT_SOURCE_MANIFEST = REPO_ROOT / "data" / "processed" / "source_manifest.json"
+DEFAULT_REVIEW_FILE = REPO_ROOT / "data" / "reviewed" / "document_reviews.json"
+
+
 DOCUMENT_CACHE_VERSION = 2
 SOURCE_MANIFEST_VERSION = 1
 
@@ -353,38 +362,37 @@ class ResolvedLocation:
 
 
 def parse_args() -> argparse.Namespace:
-    repo_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
         description="Build a self-contained UFO research dashboard from PDFs in data/sources.",
     )
     parser.add_argument(
         "--source-dir",
         type=Path,
-        default=repo_root / "data" / "sources",
+    default=DEFAULT_SOURCE_DIR,
         help="Directory containing source PDFs.",
     )
     parser.add_argument(
         "--output-html",
         type=Path,
-        default=repo_root / "dashboard" / "index.html",
+    default=DEFAULT_OUTPUT_HTML,
         help="Dashboard HTML output path.",
     )
     parser.add_argument(
         "--output-json",
         type=Path,
-        default=repo_root / "data" / "processed" / "ufo_dashboard_analysis.json",
+    default=DEFAULT_OUTPUT_JSON,
         help="Structured JSON analysis output path.",
     )
     parser.add_argument(
         "--document-cache-dir",
         type=Path,
-        default=repo_root / "data" / "processed" / "documents",
+    default=DEFAULT_DOCUMENT_CACHE_DIR,
         help="Directory for per-document JSON cache files used to resume interrupted runs.",
     )
     parser.add_argument(
       "--source-manifest",
       type=Path,
-      default=repo_root / "data" / "processed" / "source_manifest.json",
+    default=DEFAULT_SOURCE_MANIFEST,
       help="Optional JSON manifest mapping local PDF filenames to original source URLs.",
     )
     parser.add_argument(
@@ -395,7 +403,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
       "--review-file",
       type=Path,
-      default=repo_root / "data" / "reviewed" / "document_reviews.json",
+      default=DEFAULT_REVIEW_FILE,
       help="Optional JSON file containing reviewed document overrides keyed by filename.",
     )
     parser.add_argument(
@@ -462,6 +470,22 @@ def parse_args() -> argparse.Namespace:
         help="Native page text below this threshold triggers OCR fallback.",
     )
     return parser.parse_args()
+
+
+def _same_path(left: Path, right: Path) -> bool:
+  return left.expanduser().resolve() == right.expanduser().resolve()
+
+
+def validate_output_targets(args: argparse.Namespace) -> None:
+  has_limited_scope = args.max_docs is not None or args.page_limit is not None
+  if not has_limited_scope:
+    return
+
+  if _same_path(args.output_html, DEFAULT_OUTPUT_HTML) or _same_path(args.output_json, DEFAULT_OUTPUT_JSON):
+    raise ValueError(
+      "Limited runs with --max-docs or --page-limit must write to non-canonical outputs. "
+      "Pass both --output-html and --output-json to a scratch path, or rerun without limits."
+    )
 
 
 def normalize_space(text: str) -> str:
@@ -2708,6 +2732,7 @@ class BuildProgressBar:
 
 def main() -> int:
     args = parse_args()
+    validate_output_targets(args)
     source_dir = args.source_dir
     if not source_dir.exists():
         raise FileNotFoundError(f"Source directory does not exist: {source_dir}")
