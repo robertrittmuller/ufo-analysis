@@ -1399,7 +1399,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
 <head>
   <meta charset=\"utf-8\">
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-  <title>UFO Research Observatory</title>
+  <title>UFO Research</title>
   <style>
     :root {{
       --paper: #f7f0df;
@@ -1870,7 +1870,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
   <div class=\"shell\">
     <section class=\"hero\">
       <div class=\"eyebrow\">Research Dashboard</div>
-      <h1>UFO Research Observatory</h1>
+      <h1>UFO Research</h1>
       <p class=\"subtitle\">A light art deco reading room for mixed-format UFO and UAP archives. This dashboard blends native PDF parsing with OCR fallback so scanned incident files, mission reports, cables, transcripts, and imagery references can be compared on the same timeline and map.</p>
       <div class=\"hero-meta\">
         <span id=\"metaDocs\"></span>
@@ -1881,7 +1881,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     </section>
 
     <div class=\"tab-strip\" role=\"tablist\" aria-label=\"Dashboard sections\">
-      <button class=\"tab-button\" id=\"tab-overview\" type=\"button\" role=\"tab\" aria-selected=\"true\" aria-controls=\"panel-overview\" data-tab=\"overview\">Observatory</button>
+      <button class=\"tab-button\" id=\"tab-overview\" type=\"button\" role=\"tab\" aria-selected=\"true\" aria-controls=\"panel-overview\" data-tab=\"overview\">Analysis</button>
       <button class=\"tab-button\" id=\"tab-documents\" type=\"button\" role=\"tab\" aria-selected=\"false\" aria-controls=\"panel-documents\" data-tab=\"documents\" tabindex=\"-1\">Documents</button>
     </div>
 
@@ -1961,7 +1961,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       </section>
 
       <div class=\"documents-summary\">
-        <div>Refine the corpus here, then flip back to Observatory to see the same filtered subset across the charts.</div>
+          <div>Refine the corpus here, then flip back to Analysis to see the same filtered subset across the charts.</div>
         <strong id=\"documentCount\"></strong>
       </div>
 
