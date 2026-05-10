@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import csv
 import io
 import json
 import math
@@ -23,7 +24,8 @@ from dateutil import parser as date_parser
 from PIL import Image
 
 
-DOCUMENT_CACHE_VERSION = 1
+DOCUMENT_CACHE_VERSION = 2
+SOURCE_MANIFEST_VERSION = 1
 
 
 EVIDENCE_CATEGORY_DEFINITIONS = (
@@ -360,6 +362,12 @@ def parse_args() -> argparse.Namespace:
         help="Directory for per-document JSON cache files used to resume interrupted runs.",
     )
     parser.add_argument(
+      "--source-manifest",
+      type=Path,
+      default=repo_root / "data" / "processed" / "source_manifest.json",
+      help="Optional JSON manifest mapping local PDF filenames to original source URLs.",
+    )
+    parser.add_argument(
         "--refresh-document-cache",
         action="store_true",
         help="Ignore existing per-document JSON cache files and rebuild document analyses.",
@@ -486,6 +494,33 @@ def build_document_cache_options(
       "ocr_dpi": ocr_dpi,
       "min_native_chars": min_native_chars,
   }
+
+
+def load_source_manifest(path: Path) -> dict[str, str]:
+  if not path.exists():
+    return {}
+
+  try:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+  except (OSError, json.JSONDecodeError):
+    return {}
+
+  if not isinstance(payload, dict):
+    return {}
+
+  entries = payload.get("documents")
+  if payload.get("manifest_version") != SOURCE_MANIFEST_VERSION or not isinstance(entries, list):
+    return {}
+
+  urls: dict[str, str] = {}
+  for entry in entries:
+    if not isinstance(entry, dict):
+      continue
+    filename = entry.get("filename")
+    original_source_url = entry.get("original_source_url")
+    if isinstance(filename, str) and isinstance(original_source_url, str) and original_source_url:
+      urls[filename] = original_source_url
+  return urls
 
 
 def load_document_cache(
@@ -1137,6 +1172,7 @@ def analyze_document(
     path: Path,
     resolver: PlaceResolver,
     source_dir: Path,
+  source_urls: dict[str, str],
     review_overrides: dict[str, dict[str, object]],
     reviewer: LocalModelReviewer | None,
   force_review_refresh: bool,
@@ -1215,6 +1251,7 @@ def analyze_document(
         "filename": path.name,
         "title": title,
         "relative_path": str(relative_path).replace("\\", "/"),
+      "original_source_url": source_urls.get(path.name),
         "source_href": f"../data/sources/{path.name}",
         "document_type": document_type,
         "date_label": date_label,
@@ -2169,7 +2206,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         return `
           <tr>
             <td>
-              <p class="doc-title"><a href="${escapeHtml(doc.source_href)}">${escapeHtml(doc.title)}</a></p>
+              <p class="doc-title"><a href="${escapeHtml(doc.original_source_url || doc.source_href)}">${escapeHtml(doc.title)}</a></p>
               <div class="tag-row">${tags}</div>
             </td>
             <td class="classification-cell">
@@ -2257,6 +2294,27 @@ def iter_pdf_paths(source_dir: Path) -> Iterable[Path]:
     return sorted(path for path in source_dir.iterdir() if path.is_file() and path.suffix.lower() == ".pdf")
 
 
+def dedupe_pdf_paths(pdf_paths: list[Path], source_urls: dict[str, str]) -> tuple[list[Path], int]:
+  def sort_key(path: Path) -> tuple[int, int, str]:
+    is_duplicate_suffix = 1 if re.search(r"-\d+$", path.stem) else 0
+    return (is_duplicate_suffix, len(path.name), path.name.lower())
+
+  unique_paths: list[Path] = []
+  seen_source_urls: set[str] = set()
+  skipped = 0
+
+  for path in sorted(pdf_paths, key=sort_key):
+    source_url = source_urls.get(path.name)
+    if source_url and source_url in seen_source_urls:
+      skipped += 1
+      continue
+    if source_url:
+      seen_source_urls.add(source_url)
+    unique_paths.append(path)
+
+  return sorted(unique_paths), skipped
+
+
 def main() -> int:
     args = parse_args()
     source_dir = args.source_dir
@@ -2276,7 +2334,9 @@ def main() -> int:
             timeout_seconds=args.review_timeout,
             max_images=args.review_max_images,
         )
+    source_urls = load_source_manifest(args.source_manifest)
     pdf_paths = list(iter_pdf_paths(source_dir))
+    pdf_paths, skipped_duplicate_paths = dedupe_pdf_paths(pdf_paths, source_urls)
     if args.max_docs is not None:
         pdf_paths = pdf_paths[: args.max_docs]
 
@@ -2320,6 +2380,7 @@ def main() -> int:
             path=path,
             resolver=resolver,
             source_dir=source_dir,
+          source_urls=source_urls,
             review_overrides=review_overrides,
             reviewer=reviewer,
             force_review_refresh=args.refresh_reviews,
@@ -2356,6 +2417,7 @@ def main() -> int:
     print(f"Analyzed {len(documents)} documents")
     print(f"Loaded {cached_documents} document analyses from cache")
     print(f"Processed {analyzed_documents} document analyses this run")
+    print(f"Skipped {skipped_duplicate_paths} duplicate PDF files based on original source URL")
     print(f"Updated review cache {review_file_updates} times")
     print(f"Wrote JSON to {args.output_json}")
     print(f"Wrote dashboard to {args.output_html}")
