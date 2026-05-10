@@ -1302,12 +1302,6 @@ def build_research_signals(documents: list[dict[str, object]]) -> list[str]:
         hotspot, hotspot_count = Counter(locations).most_common(1)[0]
         signals.append(f"The strongest geography cluster resolves around {hotspot}, appearing in {hotspot_count} documents.")
 
-    hybrid_or_ocr = sum(1 for doc in documents if doc["extraction_method"] in {"ocr", "hybrid"})
-    if documents:
-        signals.append(
-            f"{hybrid_or_ocr} of {len(documents)} documents required OCR support, which is a useful proxy for where archival scan quality will affect downstream interpretation."
-        )
-
     themes = Counter(theme for doc in documents for theme in doc.get("themes", []))
     if themes:
       leading_themes = [name for name, _ in themes.most_common(2)]
@@ -2096,6 +2090,10 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       }
       const width = Math.max(node.clientWidth || 320, 320);
       const height = horizontal ? Math.max(entries.length * 46, 280) : 300;
+      const maxCount = Math.max(...entries.map((entry) => entry.count), 1);
+      const valueLabelWidth = horizontal
+        ? Math.max(String(maxCount).length * 8 + 16, 32)
+        : 0;
       const labelMargin = horizontal
         ? Math.min(
             Math.max(...entries.map((entry) => entry.label.length * 6.5), 140),
@@ -2103,9 +2101,8 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           )
         : 44;
       const margin = horizontal
-        ? { top: 10, right: 20, bottom: 20, left: labelMargin }
+        ? { top: 10, right: valueLabelWidth, bottom: 20, left: labelMargin }
         : { top: 16, right: 20, bottom: 48, left: 44 };
-      const maxCount = Math.max(...entries.map((entry) => entry.count), 1);
       const plotWidth = width - margin.left - margin.right;
       const plotHeight = height - margin.top - margin.bottom;
 
@@ -2248,7 +2245,6 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
 
     function renderSignals(items) {
       const years = items.map((doc) => doc.year).filter(Boolean);
-      const methods = countBy(items, (doc) => doc.extraction_method).sort((a, b) => b.count - a.count);
       const hotspots = countBy(items.filter((doc) => doc.location), (doc) => doc.location.label).sort((a, b) => b.count - a.count);
       const themes = countBy(items.flatMap((doc) => (doc.themes || []).map((theme) => ({ theme }))), (entry) => entry.theme).sort((a, b) => b.count - a.count);
       const signals = [];
@@ -2258,9 +2254,6 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       }
       if (hotspots.length) {
         signals.push(`Geolocation clustering is strongest around ${hotspots[0].label}.`);
-      }
-      if (methods.length) {
-        signals.push(`The dominant extraction path is ${methods[0].label}, which helps indicate how much of the view depends on OCR recovery.`);
       }
       if (themes.length) {
         signals.push(`The leading themes are ${themes.slice(0, 2).map((entry) => entry.label.toLowerCase()).join(' and ')}.`);
