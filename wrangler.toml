@@ -1,0 +1,7 @@
+name = "ufo-analysis-dashboard"
+compatibility_date = "2026-05-10"
+
+[assets]
+directory = "./dashboard"
+html_handling = "auto-trailing-slash"
+not_found_handling = "404-page"
