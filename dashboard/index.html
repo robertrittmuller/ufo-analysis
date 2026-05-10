@@ -151,6 +151,7 @@
       font-weight: 700;
       letter-spacing: 0;
       text-transform: uppercase;
+      overflow-wrap: anywhere;
     }
 
     .subtitle {
@@ -638,8 +639,14 @@
     table {
       width: 100%;
       border-collapse: collapse;
+      table-layout: fixed;
       font-size: 0.94rem;
     }
+
+    th:nth-child(1) { width: 28%; }
+    th:nth-child(2) { width: 22%; }
+    th:nth-child(3) { width: 20%; }
+    th:nth-child(4) { width: 30%; }
 
     th,
     td {
@@ -782,7 +789,8 @@
       }
 
       h1 {
-        font-size: clamp(2.4rem, 16vw, 4.6rem);
+        font-size: 3.55rem;
+        line-height: 0.92;
       }
 
       .hero-meta {
@@ -807,11 +815,61 @@
         flex-direction: column;
       }
 
-      th:nth-child(4),
-      td:nth-child(4) { display: none; }
+      .table-wrap table,
+      .table-wrap thead,
+      .table-wrap tbody,
+      .table-wrap tr,
+      .table-wrap td {
+        display: block;
+        width: 100%;
+      }
+
+      .table-wrap thead {
+        display: none;
+      }
+
+      .table-wrap tbody {
+        display: grid;
+        gap: 14px;
+      }
+
+      .table-wrap tr {
+        border: 1px solid rgba(244, 239, 225, 0.12);
+        background: rgba(7, 8, 11, 0.42);
+        padding: 14px;
+      }
+
+      .table-wrap tr:hover td {
+        background: transparent;
+      }
+
+      .table-wrap td {
+        border-bottom: 0;
+        padding: 0;
+      }
+
+      .table-wrap td + td {
+        margin-top: 13px;
+        padding-top: 12px;
+        border-top: 1px solid rgba(244, 239, 225, 0.08);
+      }
+
+      .table-wrap td::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 6px;
+        color: var(--gold);
+        font-size: 0.68rem;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+      }
     }
 
     @media (max-width: 500px) {
+      h1 {
+        font-size: 3rem;
+      }
+
       .hero-meta {
         grid-template-columns: 1fr;
       }
@@ -1344,16 +1402,16 @@
           : '';
         return `
           <tr>
-            <td>
+            <td data-label="Document">
               <p class="doc-title"><a href="${escapeHtml(doc.original_source_url || doc.source_href)}">${escapeHtml(doc.title)}</a></p>
               <div class="tag-row">${tags}</div>
             </td>
-            <td class="classification-cell">
+            <td class="classification-cell" data-label="Classification">
               <span class="classification-badge ${categoryClass}">${escapeHtml(doc.evidence_category || 'Category Three')}</span>
               <div class="muted">${escapeHtml(doc.evidence_category_description || '')}</div>
             </td>
-            <td>${escapeHtml(profile)}</td>
-            <td>${escapeHtml(doc.summary_narrative || 'No summary narrative available.')}${visualNote}</td>
+            <td data-label="Profile">${escapeHtml(profile)}</td>
+            <td data-label="Summary Narrative">${escapeHtml(doc.summary_narrative || 'No summary narrative available.')}${visualNote}</td>
           </tr>`;
       }).join('');
       const paginationSummary = totalItems
