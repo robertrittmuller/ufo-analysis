@@ -155,6 +155,23 @@ SUPPORT_KEYWORDS = (
   "army",
   "fbi",
 )
+REVIEW_FOCUS_KEYWORDS = (
+  "uap",
+  "ufo",
+  "unidentified aerial",
+  "unidentified anomal",
+  "flying disc",
+  "flying saucer",
+  "sighting",
+  "sightings",
+  "encounter",
+  "observed",
+  "orb",
+  "orbs",
+  "sphere",
+  "triangular",
+  "metallic",
+)
 
 
 YEAR_PATTERN = re.compile(r"\b(19[0-9]{2}|20[0-2][0-9])\b")
@@ -759,6 +776,80 @@ class LocalModelReviewer:
           break
     return selected[: self.max_images]
 
+  def _excerpt_review_page(self, page_text: str, max_chars: int = 900) -> str:
+    text = normalize_space(page_text)
+    if len(text) <= max_chars:
+      return text
+
+    lowered = text.lower()
+    keyword_positions = [lowered.find(keyword) for keyword in REVIEW_FOCUS_KEYWORDS if keyword in lowered]
+    if keyword_positions:
+      start = max(0, min(keyword_positions) - max_chars // 3)
+      end = min(len(text), start + max_chars)
+      if end < len(text) and start > 0:
+        start = max(0, end - max_chars)
+    else:
+      start = 0
+      end = max_chars
+
+    excerpt = text[start:end].strip()
+    if start > 0:
+      excerpt = f"…{excerpt}"
+    if end < len(text):
+      excerpt = f"{excerpt.rstrip()}…"
+    return excerpt
+
+  def _build_review_text_sample(self, combined_text: str, max_pages: int = 8) -> str:
+    page_lines = [normalize_space(line) for line in combined_text.splitlines() if normalize_space(line)]
+    if not page_lines:
+      return "[no extracted text available]"
+
+    keyword_ranked_pages: list[tuple[int, int]] = []
+    for page_index, page_line in enumerate(page_lines):
+      lowered = page_line.lower()
+      hits = sum(lowered.count(keyword) for keyword in REVIEW_FOCUS_KEYWORDS)
+      if hits:
+        keyword_ranked_pages.append((hits, page_index))
+
+    candidate_indices = [0]
+    for _, page_index in sorted(keyword_ranked_pages, key=lambda item: (-item[0], item[1])):
+      candidate_indices.append(page_index)
+
+    if len(page_lines) > 2:
+      candidate_indices.append(len(page_lines) // 2)
+    if len(page_lines) > 4:
+      candidate_indices.extend([len(page_lines) // 3, (2 * len(page_lines)) // 3])
+    if len(page_lines) > 1:
+      candidate_indices.append(len(page_lines) - 1)
+
+    selected_indices: list[int] = []
+    for page_index in candidate_indices:
+      if page_index < 0 or page_index >= len(page_lines) or page_index in selected_indices:
+        continue
+      selected_indices.append(page_index)
+      if len(selected_indices) >= max_pages:
+        break
+
+    selected_indices.sort()
+
+    sampled_sections: list[str] = []
+    for page_index in selected_indices:
+      page_line = page_lines[page_index]
+      match = re.match(r"^\[(Page\s+\d+)\]\s*(.*)$", page_line)
+      if match:
+        page_label = match.group(1)
+        page_body = match.group(2)
+      else:
+        page_label = f"Page {page_index + 1}"
+        page_body = page_line
+      sampled_sections.append(f"[{page_label}] {self._excerpt_review_page(page_body)}")
+
+    sampling_note = (
+      "Systematic document sample: includes the opening page, broad coverage across the file, "
+      "and pages with the strongest apparent UAP/UFO signals when present."
+    )
+    return f"{sampling_note}\n\n" + "\n\n".join(sampled_sections)
+
   def _chat(self, messages: list[dict[str, object]], max_tokens: int = 6000) -> dict[str, object]:
     payload = {
       "model": self.model_name,
@@ -782,7 +873,7 @@ class LocalModelReviewer:
     combined_text: str,
     resolver: "PlaceResolver",
   ) -> dict[str, object] | None:
-    text_slice = normalize_space(combined_text[:7000])
+    text_slice = self._build_review_text_sample(combined_text)
     attach_images = (
       document.get("document_type") == "Imagery"
       or int(document.get("text_characters") or 0) < 1200
@@ -792,6 +883,8 @@ class LocalModelReviewer:
     prompt_text = (
       "You are reviewing a UFO/UAP archive document for a research dashboard. "
       "The extracted text may contain OCR noise. Use the text and any attached page images to infer what is actually present. "
+      "Keep the document's general overview, but prioritize identifying any concrete UAP/UFO activity, sightings, incidents, or explicit lack of such activity. "
+      "If the document is large or compiled from multiple items, synthesize systematically from the full sample instead of over-weighting the opening page. "
       "Return only a JSON object with these keys: summary_narrative, visual_observations, document_type, themes, agencies, location_label, evidence_category. "
       f"document_type must be one of {sorted(DOCUMENT_TYPE_LABELS)}. "
       f"themes must be chosen only from {sorted(THEME_KEYWORDS)}. "
@@ -801,7 +894,8 @@ class LocalModelReviewer:
       "Category Three is for reports with little meaningful evidence or very sparse eyewitness support. "
       "agencies should be a short array of specific organizations supported by the material, not guesses. "
       "location_label should be a short place name if the material makes one reasonably clear, otherwise null. "
-      "summary_narrative must be 4 sentences covering who, what, where, and significance. "
+      "summary_narrative must be 4 sentences covering who, the document's overall subject, where, and significance. "
+      "Within those 4 sentences, explicitly state what UAP/UFO activity is described, where in the document it appears if that can be inferred from the sampled pages or sections, and say clearly when no actual UAP/UFO activity is present. "
       "visual_observations should describe only visible imagery or scene evidence and be null when there is no meaningful visual evidence beyond text formatting.\n\n"
       f"Filename: {document['filename']}\n"
       f"Title: {document['title']}\n"
@@ -810,7 +904,7 @@ class LocalModelReviewer:
       f"Current location hint: {document.get('location', {}).get('label') if document.get('location') else None}\n"
       f"Current theme hints: {document.get('themes', [])}\n"
       f"Current agency hints: {document.get('agencies', [])}\n"
-      f"Extracted text:\n{text_slice or '[no extracted text available]'}"
+      f"Systematic extracted text sample:\n{text_slice or '[no extracted text available]'}"
     )
 
     content: str | list[dict[str, object]] = prompt_text
