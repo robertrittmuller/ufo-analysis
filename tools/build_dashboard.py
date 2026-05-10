@@ -1961,7 +1961,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       </section>
 
       <div class=\"documents-summary\">
-          <div>Refine the corpus here, then flip back to Analysis to see the same filtered subset across the charts.</div>
+          <div>Refine the register here without changing the Analysis tab, which always shows the full corpus.</div>
         <strong id=\"documentCount\"></strong>
       </div>
 
@@ -2254,7 +2254,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       const signals = [];
       if (years.length) {
         const counts = countBy(items.filter((doc) => doc.year), (doc) => doc.year).sort((a, b) => b.count - a.count);
-        signals.push(`Peak activity in the filtered view lands in ${counts[0].label} with ${counts[0].count} documents.`);
+        signals.push(`Peak activity in the corpus lands in ${counts[0].label} with ${counts[0].count} documents.`);
       }
       if (hotspots.length) {
         signals.push(`Geolocation clustering is strongest around ${hotspots[0].label}.`);
@@ -2436,19 +2436,20 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     }
 
     function updateDashboard() {
-      const items = filteredDocuments();
-      const yearly = countBy(items.filter((doc) => doc.year), (doc) => doc.year).sort((a, b) => Number(a.label) - Number(b.label));
-      const types = countBy(items, (doc) => doc.document_type).sort((a, b) => b.count - a.count).slice(0, 12);
-      renderMetrics(items);
+      const analysisItems = documents;
+      const documentItems = filteredDocuments();
+      const yearly = countBy(analysisItems.filter((doc) => doc.year), (doc) => doc.year).sort((a, b) => Number(a.label) - Number(b.label));
+      const types = countBy(analysisItems, (doc) => doc.document_type).sort((a, b) => b.count - a.count).slice(0, 12);
+      renderMetrics(analysisItems);
       renderBarChart('timelineChart', yearly, '#2d7075', false);
       renderBarChart('typeChart', types, '#b88432', true);
-      renderMap(items);
-      renderSignals(items);
-      renderThemes(items);
-      renderOrganizations(items);
-      renderClassifications(items);
-      renderHotspots(items);
-      renderDocuments(items);
+      renderMap(analysisItems);
+      renderSignals(analysisItems);
+      renderThemes(analysisItems);
+      renderOrganizations(analysisItems);
+      renderClassifications(analysisItems);
+      renderHotspots(analysisItems);
+      renderDocuments(documentItems);
     }
 
     function populateFilter(select, label, values) {
