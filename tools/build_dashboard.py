@@ -2387,6 +2387,21 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       line-height: 1.58;
     }}
 
+    .chart-click-target {{
+      cursor: pointer;
+    }}
+
+    .chart-click-target:hover rect,
+    .chart-click-target:focus-visible rect {{
+      opacity: 1;
+      stroke: rgba(244, 239, 225, 0.72);
+      stroke-width: 1.4;
+    }}
+
+    .chart-click-target:focus-visible {{
+      outline: none;
+    }}
+
     .table-wrap {{
       overflow: visible;
     }}
@@ -2676,7 +2691,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         <strong id=\"documentCount\"></strong>
       </div>
 
-      <section class=\"panel\">
+      <section class=\"panel\" id=\"documentRegister\">
         <h2>Document Register</h2>
         <div class=\"table-wrap\">
           <table>
@@ -2832,7 +2847,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       node.innerHTML = `${paragraphs}${generated}`;
     }
 
-    function renderBarChart(targetId, entries, color, horizontal = false) {
+    function renderBarChart(targetId, entries, color, horizontal = false, options = {}) {
       const node = document.getElementById(targetId);
       if (!node) {
         return;
@@ -2864,10 +2879,20 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         const bars = entries.map((entry, index) => {
           const y = margin.top + index * barHeight + 7;
           const barWidth = (entry.count / maxCount) * plotWidth;
+          const actionAttribute = options.actionDataKey
+            ? ` data-${options.actionDataKey}="${escapeHtml(entry.label)}"`
+            : '';
+          const actionClass = options.actionDataKey ? ' class="chart-click-target"' : '';
+          const roleAttribute = options.actionDataKey ? ' role="button" tabindex="0"' : '';
+          const ariaAttribute = options.actionLabel
+            ? ` aria-label="${escapeHtml(options.actionLabel(entry))}"`
+            : '';
           return `
-            <text x="${margin.left - 12}" y="${y + 14}" text-anchor="end" font-size="12" fill="${chartColors.muted}">${escapeHtml(entry.label)}</text>
-            <rect x="${margin.left}" y="${y}" width="${barWidth}" height="20" fill="${color}" opacity="0.82"></rect>
-            <text x="${margin.left + barWidth + 8}" y="${y + 14}" font-size="12" fill="${chartColors.ink}">${entry.count}</text>`;
+            <g${actionClass}${actionAttribute}${roleAttribute}${ariaAttribute}>
+              <text x="${margin.left - 12}" y="${y + 14}" text-anchor="end" font-size="12" fill="${chartColors.muted}">${escapeHtml(entry.label)}</text>
+              <rect x="${margin.left}" y="${y}" width="${barWidth}" height="20" fill="${color}" opacity="0.82"></rect>
+              <text x="${margin.left + barWidth + 8}" y="${y + 14}" font-size="12" fill="${chartColors.ink}">${entry.count}</text>
+            </g>`;
         }).join('');
         node.innerHTML = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img">${bars}</svg>`;
         return;
@@ -3041,7 +3066,37 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           count: items.filter((doc) => doc.evidence_category === entry.label).length,
         }))
         .sort((a, b) => a.rank - b.rank);
-      renderBarChart('classificationChart', categories, chartColors.red, true);
+      renderBarChart('classificationChart', categories, chartColors.red, true, {
+        actionDataKey: 'category',
+        actionLabel: (entry) => `Filter documents to ${entry.label}`,
+      });
+      document.querySelectorAll('#classificationChart [data-category]').forEach((element) => {
+        const category = element.dataset.category;
+        element.addEventListener('click', () => openDocumentsForCategory(category));
+        element.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') {
+            return;
+          }
+          event.preventDefault();
+          openDocumentsForCategory(category);
+        });
+      });
+    }
+
+    function openDocumentsForCategory(category) {
+      if (!category) {
+        return;
+      }
+      state.category = category;
+      const categoryFilter = document.getElementById('categoryFilter');
+      if (categoryFilter) {
+        categoryFilter.value = category;
+      }
+      resetDocumentPage();
+      setActiveTab('documents');
+      requestAnimationFrame(() => {
+        document.getElementById('documentRegister')?.scrollIntoView({ block: 'start' });
+      });
     }
 
     function renderHotspots(items) {
