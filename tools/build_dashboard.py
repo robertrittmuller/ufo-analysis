@@ -1798,13 +1798,13 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       </section>
 
       <section class=\"panel span-4\">
-        <h2>Recurring Themes</h2>
-        <div id=\"themeGrid\" class=\"theme-grid\"></div>
-      </section>
-
-      <section class=\"panel span-4\">
         <h2>Organizations Mentioned</h2>
         <div id=\"organizationChart\" class=\"svg-wrap\"></div>
+      </section>
+
+      <section class=\"panel span-12\">
+        <h2>Recurring Themes</h2>
+        <div id=\"themeGrid\" class=\"theme-grid\"></div>
       </section>
 
       <section class=\"panel span-12\">
