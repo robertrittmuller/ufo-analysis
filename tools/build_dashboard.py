@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
+import hashlib
 import io
 import json
 import math
@@ -38,6 +39,8 @@ DEFAULT_REVIEW_FILE = REPO_ROOT / "data" / "reviewed" / "document_reviews.json"
 
 DOCUMENT_CACHE_VERSION = 2
 SOURCE_MANIFEST_VERSION = 1
+EXECUTIVE_SUMMARY_REVIEW_KEY = "__corpus_executive_summary__"
+EXECUTIVE_SUMMARY_VERSION = 1
 
 
 EVIDENCE_CATEGORY_DEFINITIONS = (
@@ -1009,6 +1012,78 @@ class LocalModelReviewer:
 
     return review if "summary_narrative" in review else None
 
+  def review_corpus(self, documents: list[dict[str, object]]) -> dict[str, object] | None:
+    summary_blocks: list[str] = []
+    for index, document in enumerate(documents, start=1):
+      summary = normalize_space(str(document.get("summary_narrative") or ""))
+      if not summary:
+        continue
+      themes = ", ".join(str(theme) for theme in document.get("themes", []) if isinstance(theme, str))
+      location = document.get("location")
+      location_label = location.get("label") if isinstance(location, dict) else None
+      summary_blocks.append(
+        "\n".join(
+          [
+            f"{index}. {document.get('title')}",
+            f"Year: {document.get('year') or document.get('year_start') or 'unknown'}",
+            f"Type: {document.get('document_type')}",
+            f"Evidence category: {document.get('evidence_category') or 'unclassified'}",
+            f"Location: {location_label or 'unknown'}",
+            f"Themes: {themes or 'none'}",
+            f"Summary: {summary}",
+          ]
+        )
+      )
+
+    if not summary_blocks:
+      return None
+
+    prompt_text = (
+      "You are writing the Executive Summary for a UFO/UAP research dashboard. "
+      "Use every document summary below as source material, and synthesize across the whole corpus rather than retelling one document at a time. "
+      "Build a careful narrative around what the data might mean: historical development, institutional behavior, geography, evidence quality, recurring observation patterns, and outliers. "
+      "Call out specific elements that stand out, including document titles or event clusters when useful. "
+      "Do not overstate certainty; distinguish concrete patterns in the summaries from interpretation. "
+      "Return only a JSON object with key executive_summary_sections. "
+      "executive_summary_sections must be an array of 3 to 5 polished paragraphs, each 2 to 4 sentences. "
+      "Avoid bullets and avoid generic caveats.\n\n"
+      "Document summaries:\n"
+      + "\n\n".join(summary_blocks)
+    )
+
+    try:
+      response = self._chat([{"role": "user", "content": prompt_text}], max_tokens=6000)
+    except (urllib_error.URLError, TimeoutError, json.JSONDecodeError):
+      return None
+
+    choices = response.get("choices") or []
+    if not choices:
+      return None
+    message = choices[0].get("message") or {}
+    content_text = message.get("content")
+    payload = extract_json_object(content_text) if isinstance(content_text, str) else None
+    if not payload:
+      reasoning_text = message.get("reasoning_content")
+      payload = extract_json_object(reasoning_text) if isinstance(reasoning_text, str) else None
+    if not payload:
+      return None
+
+    raw_sections = payload.get("executive_summary_sections")
+    sections: list[str] = []
+    if isinstance(raw_sections, list):
+      sections = [normalize_space(section) for section in raw_sections if isinstance(section, str) and normalize_space(section)]
+    elif isinstance(payload.get("executive_summary"), str):
+      sections = [normalize_space(payload["executive_summary"])]
+
+    if not sections:
+      return None
+
+    return {
+      "review_status": "reviewed",
+      "review_source": f"local_model:{self.model_name}",
+      "executive_summary_sections": sections[:5],
+    }
+
 
 def tokenize(text: str) -> list[str]:
     tokens = []
@@ -1440,7 +1515,54 @@ def build_research_signals(documents: list[dict[str, object]]) -> list[str]:
     return signals[:4]
 
 
-def build_analysis(documents: list[dict[str, object]], source_dir: Path) -> dict[str, object]:
+def build_executive_summary_signature(documents: list[dict[str, object]]) -> str:
+    signature_documents = []
+    for document in documents:
+      location = document.get("location")
+      signature_documents.append(
+        {
+          "filename": document.get("filename"),
+          "title": document.get("title"),
+          "year": document.get("year"),
+          "document_type": document.get("document_type"),
+          "evidence_category": document.get("evidence_category"),
+          "themes": document.get("themes", []),
+          "location": location.get("label") if isinstance(location, dict) else None,
+          "summary_narrative": document.get("summary_narrative"),
+        }
+      )
+    payload = json.dumps(signature_documents, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def normalize_executive_summary_review(
+    review: dict[str, object] | None,
+    corpus_signature: str,
+) -> dict[str, object] | None:
+    if not isinstance(review, dict):
+      return None
+    if review.get("review_version") != EXECUTIVE_SUMMARY_VERSION:
+      return None
+    if review.get("corpus_signature") != corpus_signature:
+      return None
+    raw_sections = review.get("executive_summary_sections")
+    if not isinstance(raw_sections, list):
+      return None
+    sections = [normalize_space(section) for section in raw_sections if isinstance(section, str) and normalize_space(section)]
+    if not sections:
+      return None
+    return {
+      "sections": sections[:5],
+      "source": review.get("review_source"),
+      "generated_at": review.get("generated_at"),
+    }
+
+
+def build_analysis(
+    documents: list[dict[str, object]],
+    source_dir: Path,
+    executive_summary: dict[str, object] | None = None,
+) -> dict[str, object]:
     year_counts = Counter(doc["year"] for doc in documents if isinstance(doc.get("year"), int))
     type_counts = Counter(doc["document_type"] for doc in documents)
     method_counts = Counter(doc["extraction_method"] for doc in documents)
@@ -1492,6 +1614,7 @@ def build_analysis(documents: list[dict[str, object]], source_dir: Path) -> dict
         "keyword_counts": [{"term": term, "count": count} for term, count in keyword_counts.most_common(28)],
         "hotspots": sorted(hotspots.values(), key=lambda item: item["count"], reverse=True),
         "research_signals": build_research_signals(documents),
+        "executive_summary": executive_summary,
         "documents": documents,
     }
     return analysis
@@ -1822,6 +1945,27 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       color: var(--muted);
     }}
 
+    .executive-summary {{
+      display: grid;
+      gap: 14px;
+      max-width: 1120px;
+    }}
+
+    .executive-summary p {{
+      margin: 0;
+      color: var(--ink);
+      font-size: 1rem;
+      line-height: 1.72;
+    }}
+
+    .executive-summary-meta {{
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }}
+
     .svg-wrap {{ min-height: 280px; }}
 
     .chart-note,
@@ -2005,6 +2149,11 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         <section class=\"panel span-12\">
           <h2>Corpus Summary</h2>
           <div id=\"metrics\" class=\"metrics\"></div>
+        </section>
+
+        <section class=\"panel span-12\">
+          <h2>Executive Summary</h2>
+          <div id=\"executiveSummary\" class=\"executive-summary\"></div>
         </section>
 
         <section class=\"panel span-8\">
@@ -2198,6 +2347,21 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           <div class="value">${escapeHtml(card.value)}</div>
           <div class="label">${escapeHtml(card.label)}</div>
         </div>`).join('');
+    }
+
+    function renderExecutiveSummary() {
+      const node = document.getElementById('executiveSummary');
+      const summary = analysis.executive_summary || {};
+      const sections = Array.isArray(summary.sections) ? summary.sections.filter(Boolean) : [];
+      if (!sections.length) {
+        node.innerHTML = '<p class="muted">No executive summary has been generated for this corpus yet.</p>';
+        return;
+      }
+      const paragraphs = sections.map((section) => `<p>${escapeHtml(section)}</p>`).join('');
+      const generated = summary.generated_at
+        ? `<div class="executive-summary-meta">Generated ${escapeHtml(summary.generated_at.replace('T', ' ').replace('Z', ' UTC'))}</div>`
+        : '';
+      node.innerHTML = `${paragraphs}${generated}`;
     }
 
     function renderBarChart(targetId, entries, color, horizontal = false) {
@@ -2555,6 +2719,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       const yearly = countBy(analysisItems.filter((doc) => doc.year), (doc) => doc.year).sort((a, b) => Number(a.label) - Number(b.label));
       const types = countBy(analysisItems, (doc) => doc.document_type).sort((a, b) => b.count - a.count).slice(0, 12);
       renderMetrics(analysisItems);
+      renderExecutiveSummary();
       renderBarChart('timelineChart', yearly, '#2d7075', false);
       renderBarChart('typeChart', types, '#b88432', true);
       renderMap(analysisItems);
@@ -2828,7 +2993,27 @@ def main() -> int:
 
     progress.finish()
 
-    analysis = build_analysis(documents, source_dir)
+    corpus_signature = build_executive_summary_signature(documents)
+    cached_executive_summary = normalize_executive_summary_review(
+        review_overrides.get(EXECUTIVE_SUMMARY_REVIEW_KEY),
+        corpus_signature,
+    )
+    executive_summary = cached_executive_summary
+    if reviewer is not None and (args.refresh_reviews or executive_summary is None):
+        generated_executive_summary = reviewer.review_corpus(documents)
+        if generated_executive_summary:
+            executive_summary_review = {
+                **generated_executive_summary,
+                "review_version": EXECUTIVE_SUMMARY_VERSION,
+                "corpus_signature": corpus_signature,
+                "generated_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+            }
+            review_overrides[EXECUTIVE_SUMMARY_REVIEW_KEY] = executive_summary_review
+            executive_summary = normalize_executive_summary_review(executive_summary_review, corpus_signature)
+            write_review_overrides(args.review_file, review_overrides)
+            review_file_updates += 1
+
+    analysis = build_analysis(documents, source_dir, executive_summary=executive_summary)
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_html.parent.mkdir(parents=True, exist_ok=True)
     if args.review_mode == "hybrid" and review_overrides:
