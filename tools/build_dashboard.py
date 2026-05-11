@@ -2392,10 +2392,27 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     }}
 
     .chart-click-target:hover rect,
+    .chart-click-target:hover circle,
+    .chart-click-target:hover.hotspot,
     .chart-click-target:focus-visible rect {{
       opacity: 1;
       stroke: rgba(244, 239, 225, 0.72);
       stroke-width: 1.4;
+    }}
+
+    .theme-chip.chart-click-target:hover,
+    .theme-chip.chart-click-target:focus-visible {{
+      border-color: rgba(244, 239, 225, 0.42);
+    }}
+
+    .signal.chart-click-target:hover,
+    .signal.chart-click-target:focus-visible {{
+      border-left-color: var(--gold);
+    }}
+
+    .chart-click-target:focus-visible circle {{
+      stroke: rgba(244, 239, 225, 0.88);
+      stroke-width: 2.2;
     }}
 
     .chart-click-target:focus-visible {{
@@ -2873,22 +2890,24 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         : { top: 16, right: 20, bottom: 48, left: 44 };
       const plotWidth = width - margin.left - margin.right;
       const plotHeight = height - margin.top - margin.bottom;
+      const actionAttributes = (entry) => {
+        if (!options.actionDataKey) {
+          return '';
+        }
+        const value = entry.filterValue ?? entry.label;
+        const ariaLabel = options.actionLabel
+          ? options.actionLabel(entry)
+          : `Filter documents to ${entry.label}`;
+        return ` class="chart-click-target" data-${options.actionDataKey}="${escapeHtml(value)}" role="button" tabindex="0" aria-label="${escapeHtml(ariaLabel)}"`;
+      };
 
       if (horizontal) {
         const barHeight = plotHeight / entries.length;
         const bars = entries.map((entry, index) => {
           const y = margin.top + index * barHeight + 7;
           const barWidth = (entry.count / maxCount) * plotWidth;
-          const actionAttribute = options.actionDataKey
-            ? ` data-${options.actionDataKey}="${escapeHtml(entry.label)}"`
-            : '';
-          const actionClass = options.actionDataKey ? ' class="chart-click-target"' : '';
-          const roleAttribute = options.actionDataKey ? ' role="button" tabindex="0"' : '';
-          const ariaAttribute = options.actionLabel
-            ? ` aria-label="${escapeHtml(options.actionLabel(entry))}"`
-            : '';
           return `
-            <g${actionClass}${actionAttribute}${roleAttribute}${ariaAttribute}>
+            <g${actionAttributes(entry)}>
               <text x="${margin.left - 12}" y="${y + 14}" text-anchor="end" font-size="12" fill="${chartColors.muted}">${escapeHtml(entry.label)}</text>
               <rect x="${margin.left}" y="${y}" width="${barWidth}" height="20" fill="${color}" opacity="0.82"></rect>
               <text x="${margin.left + barWidth + 8}" y="${y + 14}" font-size="12" fill="${chartColors.ink}">${entry.count}</text>
@@ -2905,8 +2924,10 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         const y = margin.top + plotHeight - h;
         const showLabel = entries.length <= 24 || index % Math.ceil(entries.length / 12) === 0;
         return `
-          <rect x="${x}" y="${y}" width="${Math.max(barWidth - 12, 6)}" height="${h}" fill="${color}" opacity="0.86"></rect>
-          <text x="${x + Math.max(barWidth - 12, 6) / 2}" y="${margin.top + plotHeight + 18}" text-anchor="middle" font-size="11" fill="${chartColors.muted}">${showLabel ? escapeHtml(entry.label) : ''}</text>`;
+          <g${actionAttributes(entry)}>
+            <rect x="${x}" y="${y}" width="${Math.max(barWidth - 12, 6)}" height="${h}" fill="${color}" opacity="0.86"></rect>
+            <text x="${x + Math.max(barWidth - 12, 6) / 2}" y="${margin.top + plotHeight + 18}" text-anchor="middle" font-size="11" fill="${chartColors.muted}">${showLabel ? escapeHtml(entry.label) : ''}</text>
+          </g>`;
       }).join('');
 
       const grid = Array.from({ length: 5 }, (_, index) => {
@@ -3000,13 +3021,15 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         }
         const title = `${cluster.label} (${cluster.count})`;
         return `
-          <circle cx="${x}" cy="${y}" r="${radius}" fill="rgba(86,214,201,0.16)" stroke="${chartColors.teal}" stroke-width="1.6">
-            <title>${escapeHtml(title)}</title>
-          </circle>
-          <circle cx="${x}" cy="${y}" r="2.5" fill="${chartColors.gold}">
-            <title>${escapeHtml(title)}</title>
-          </circle>
-          ${canPlaceLabel ? `<text x="${x}" y="${labelY}" text-anchor="middle" font-size="11" fill="${chartColors.ink}">${escapeHtml(title)}</text>` : ''}`;
+          <g class="chart-click-target" data-place="${escapeHtml(cluster.label)}" role="button" tabindex="0" aria-label="Filter documents to ${escapeHtml(cluster.label)}">
+            <circle cx="${x}" cy="${y}" r="${radius}" fill="rgba(86,214,201,0.16)" stroke="${chartColors.teal}" stroke-width="1.6">
+              <title>${escapeHtml(title)}</title>
+            </circle>
+            <circle cx="${x}" cy="${y}" r="2.5" fill="${chartColors.gold}">
+              <title>${escapeHtml(title)}</title>
+            </circle>
+            ${canPlaceLabel ? `<text x="${x}" y="${labelY}" text-anchor="middle" font-size="11" fill="${chartColors.ink}">${escapeHtml(title)}</text>` : ''}
+          </g>`;
       }).join('');
 
       node.innerHTML = `
@@ -3019,6 +3042,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           ${axisLabels}
           <text x="24" y="34" font-size="12" fill="${chartColors.muted}">World Reference Map</text>
         </svg>`;
+      bindChartFilterTargets('#mapChart [data-place]', (element) => openDocumentsWithFilters({ place: element.dataset.place }));
     }
 
     function renderSignals(items) {
@@ -3028,15 +3052,30 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       const signals = [];
       if (years.length) {
         const counts = countBy(items.filter((doc) => doc.year), (doc) => doc.year).sort((a, b) => b.count - a.count);
-        signals.push(`Peak activity in the corpus lands in ${counts[0].label} with ${counts[0].count} documents.`);
+        signals.push({
+          text: `Peak activity in the corpus lands in ${counts[0].label} with ${counts[0].count} documents.`,
+          filters: { yearMin: Number(counts[0].label), yearMax: Number(counts[0].label) },
+        });
       }
       if (hotspots.length) {
-        signals.push(`Geolocation clustering is strongest around ${hotspots[0].label}.`);
+        signals.push({
+          text: `Geolocation clustering is strongest around ${hotspots[0].label}.`,
+          filters: { place: hotspots[0].label },
+        });
       }
       if (themes.length) {
-        signals.push(`The leading themes are ${themes.slice(0, 2).map((entry) => entry.label.toLowerCase()).join(' and ')}.`);
+        signals.push({
+          text: `The leading themes are ${themes.slice(0, 2).map((entry) => entry.label.toLowerCase()).join(' and ')}.`,
+          filters: { search: themes[0].label },
+        });
       }
-      document.getElementById('researchSignals').innerHTML = signals.map((signal) => `<div class="signal">${escapeHtml(signal)}</div>`).join('');
+      document.getElementById('researchSignals').innerHTML = signals.map((signal, index) => `<div class="signal chart-click-target" data-signal-index="${index}" role="button" tabindex="0" aria-label="Filter documents for this research signal">${escapeHtml(signal.text)}</div>`).join('');
+      bindChartFilterTargets('#researchSignals [data-signal-index]', (element) => {
+        const signal = signals[Number(element.dataset.signalIndex)];
+        if (signal) {
+          openDocumentsWithFilters(signal.filters);
+        }
+      });
     }
 
     function renderThemes(items) {
@@ -3044,8 +3083,9 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         .sort((a, b) => b.count - a.count)
         .slice(0, 10);
       document.getElementById('themeGrid').innerHTML = themes.length
-        ? themes.map((entry) => `<div class="theme-chip"><strong>${escapeHtml(entry.label)}</strong><div class="muted">${entry.count} documents</div></div>`).join('')
+        ? themes.map((entry) => `<div class="theme-chip chart-click-target" data-search="${escapeHtml(entry.label)}" role="button" tabindex="0" aria-label="Search documents for ${escapeHtml(entry.label)}"><strong>${escapeHtml(entry.label)}</strong><div class="muted">${entry.count} documents</div></div>`).join('')
         : '<p class="chart-note">No themes match the current filters.</p>';
+      bindChartFilterTargets('#themeGrid [data-search]', (element) => openDocumentsWithFilters({ search: element.dataset.search }));
     }
 
     function renderOrganizations(items) {
@@ -3055,7 +3095,11 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       )
         .sort((a, b) => b.count - a.count)
         .slice(0, 12);
-      renderBarChart('organizationChart', organizations, chartColors.green, true);
+      renderBarChart('organizationChart', organizations, chartColors.green, true, {
+        actionDataKey: 'search',
+        actionLabel: (entry) => `Search documents for ${entry.label}`,
+      });
+      bindChartFilterTargets('#organizationChart [data-search]', (element) => openDocumentsWithFilters({ search: element.dataset.search }));
     }
 
     function renderClassifications(items) {
@@ -3070,29 +3114,48 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         actionDataKey: 'category',
         actionLabel: (entry) => `Filter documents to ${entry.label}`,
       });
-      document.querySelectorAll('#classificationChart [data-category]').forEach((element) => {
-        const category = element.dataset.category;
-        element.addEventListener('click', () => openDocumentsForCategory(category));
+      bindChartFilterTargets('#classificationChart [data-category]', (element) => openDocumentsWithFilters({ category: element.dataset.category }));
+    }
+
+    function bindChartFilterTargets(selector, handler) {
+      document.querySelectorAll(selector).forEach((element) => {
+        element.addEventListener('click', () => handler(element));
         element.addEventListener('keydown', (event) => {
           if (event.key !== 'Enter' && event.key !== ' ') {
             return;
           }
           event.preventDefault();
-          openDocumentsForCategory(category);
+          handler(element);
         });
       });
     }
 
-    function openDocumentsForCategory(category) {
-      if (!category) {
-        return;
-      }
-      state.category = category;
-      const categoryFilter = document.getElementById('categoryFilter');
-      if (categoryFilter) {
-        categoryFilter.value = category;
-      }
+    function defaultDocumentFilters() {
+      return {
+        search: '',
+        type: 'all',
+        method: 'all',
+        category: 'all',
+        place: 'all',
+        yearMin: analysis.year_min || 1900,
+        yearMax: analysis.year_max || new Date().getFullYear(),
+      };
+    }
+
+    function syncDocumentFilterControls() {
+      document.getElementById('searchInput').value = state.search;
+      document.getElementById('typeFilter').value = state.type;
+      document.getElementById('methodFilter').value = state.method;
+      document.getElementById('categoryFilter').value = state.category;
+      document.getElementById('placeFilter').value = state.place;
+      document.getElementById('yearMin').value = state.yearMin;
+      document.getElementById('yearMax').value = state.yearMax;
+    }
+
+    function openDocumentsWithFilters(filters) {
+      Object.assign(state, defaultDocumentFilters(), filters);
       resetDocumentPage();
+      syncDocumentFilterControls();
       setActiveTab('documents');
       requestAnimationFrame(() => {
         document.getElementById('documentRegister')?.scrollIntoView({ block: 'start' });
@@ -3104,8 +3167,9 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         .sort((a, b) => b.count - a.count)
         .slice(0, 10);
       document.getElementById('hotspots').innerHTML = hotspots.length
-        ? hotspots.map((entry) => `<div class="hotspot"><span>${escapeHtml(entry.label)}</span><strong>${entry.count}</strong></div>`).join('')
+        ? hotspots.map((entry) => `<div class="hotspot chart-click-target" data-place="${escapeHtml(entry.label)}" role="button" tabindex="0" aria-label="Filter documents to ${escapeHtml(entry.label)}"><span>${escapeHtml(entry.label)}</span><strong>${entry.count}</strong></div>`).join('')
         : '<p class="chart-note">No location clusters match the current filters.</p>';
+      bindChartFilterTargets('#hotspots [data-place]', (element) => openDocumentsWithFilters({ place: element.dataset.place }));
     }
 
     function renderDocuments(items) {
@@ -3243,8 +3307,21 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       const types = countBy(analysisItems, (doc) => doc.document_type).sort((a, b) => b.count - a.count).slice(0, 12);
       renderMetrics(analysisItems);
       renderExecutiveSummary();
-      renderBarChart('timelineChart', yearly, chartColors.teal, false);
-      renderBarChart('typeChart', types, chartColors.gold, true);
+      renderBarChart('timelineChart', yearly, chartColors.teal, false, {
+        actionDataKey: 'year',
+        actionLabel: (entry) => `Filter documents to ${entry.label}`,
+      });
+      bindChartFilterTargets('#timelineChart [data-year]', (element) => {
+        const year = Number(element.dataset.year);
+        if (Number.isFinite(year)) {
+          openDocumentsWithFilters({ yearMin: year, yearMax: year });
+        }
+      });
+      renderBarChart('typeChart', types, chartColors.gold, true, {
+        actionDataKey: 'type',
+        actionLabel: (entry) => `Filter documents to ${entry.label}`,
+      });
+      bindChartFilterTargets('#typeChart [data-type]', (element) => openDocumentsWithFilters({ type: element.dataset.type }));
       renderMap(analysisItems);
       renderSignals(analysisItems);
       renderThemes(analysisItems);
