@@ -11,7 +11,9 @@ import json
 import math
 import re
 import shutil
+import subprocess
 import sys
+import tempfile
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -41,6 +43,11 @@ DOCUMENT_CACHE_VERSION = 2
 SOURCE_MANIFEST_VERSION = 1
 EXECUTIVE_SUMMARY_REVIEW_KEY = "__corpus_executive_summary__"
 EXECUTIVE_SUMMARY_VERSION = 1
+
+PDF_EXTENSIONS = {".pdf"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
+SUPPORTED_SOURCE_EXTENSIONS = PDF_EXTENSIONS | IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
 
 EVIDENCE_CATEGORY_DEFINITIONS = (
@@ -327,6 +334,7 @@ DOCUMENT_TYPE_PATTERNS = [
     ("Mission Report", ["mission report"]),
     ("Incident Summary", ["incident summary", "incident summaries"]),
     ("Transcript", ["transcript", "crew debriefing"]),
+    ("Video / Audio", ["video", "audio excerpt", "audio recording"]),
     ("Debrief / Reporting Form", ["debrief", "reporting form"]),
     ("Diplomatic Cable", ["cable"]),
     ("Email Correspondence", ["email correspondence", "email correspondance", "email"]),
@@ -366,13 +374,13 @@ class ResolvedLocation:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a self-contained UFO research dashboard from PDFs in data/sources.",
+        description="Build a self-contained UFO research dashboard from media in data/sources.",
     )
     parser.add_argument(
         "--source-dir",
         type=Path,
     default=DEFAULT_SOURCE_DIR,
-        help="Directory containing source PDFs.",
+        help="Directory containing source PDFs, images, and video clips.",
     )
     parser.add_argument(
         "--output-html",
@@ -396,7 +404,7 @@ def parse_args() -> argparse.Namespace:
       "--source-manifest",
       type=Path,
     default=DEFAULT_SOURCE_MANIFEST,
-      help="Optional JSON manifest mapping local PDF filenames to original source URLs.",
+      help="Optional JSON manifest mapping local filenames to source metadata.",
     )
     parser.add_argument(
         "--refresh-document-cache",
@@ -543,7 +551,7 @@ def build_document_cache_options(
   }
 
 
-def load_source_manifest(path: Path) -> dict[str, str]:
+def load_source_manifest(path: Path) -> dict[str, dict[str, object]]:
   if not path.exists():
     return {}
 
@@ -559,15 +567,61 @@ def load_source_manifest(path: Path) -> dict[str, str]:
   if payload.get("manifest_version") != SOURCE_MANIFEST_VERSION or not isinstance(entries, list):
     return {}
 
-  urls: dict[str, str] = {}
+  manifest: dict[str, dict[str, object]] = {}
   for entry in entries:
     if not isinstance(entry, dict):
       continue
     filename = entry.get("filename")
-    original_source_url = entry.get("original_source_url")
-    if isinstance(filename, str) and isinstance(original_source_url, str) and original_source_url:
-      urls[filename] = original_source_url
-  return urls
+    if isinstance(filename, str) and filename:
+      manifest[filename] = entry
+  return manifest
+
+
+def original_source_url(source_metadata: dict[str, object] | None) -> str | None:
+  if not source_metadata:
+    return None
+  value = source_metadata.get("original_source_url")
+  if not isinstance(value, str):
+    return None
+  cleaned = normalize_space(value)
+  if not cleaned or cleaned.upper() == "N/A":
+    return None
+  return cleaned
+
+
+def manifest_text(source_metadata: dict[str, object] | None, *keys: str) -> str:
+  if not source_metadata:
+    return ""
+  values = []
+  for key in keys:
+    value = source_metadata.get(key)
+    if value is None:
+      continue
+    cleaned = normalize_space(str(value))
+    if cleaned and cleaned.upper() != "N/A":
+      values.append(cleaned)
+  return " ".join(dict.fromkeys(values))
+
+
+def first_manifest_text(source_metadata: dict[str, object] | None, *keys: str) -> str | None:
+  if not source_metadata:
+    return None
+  for key in keys:
+    value = source_metadata.get(key)
+    if value is None:
+      continue
+    cleaned = normalize_space(str(value))
+    if cleaned and cleaned.upper() != "N/A":
+      return cleaned
+  return None
+
+
+def source_thumbnail_url(source_metadata: dict[str, object] | None, media_type: str) -> str | None:
+  if media_type == "video":
+    return first_manifest_text(source_metadata, "thumbnail_url", "modal_image_url")
+  if media_type == "image":
+    return first_manifest_text(source_metadata, "modal_image_url", "page_media_url", "original_source_url")
+  return first_manifest_text(source_metadata, "modal_image_url")
 
 
 def load_document_cache(
@@ -780,10 +834,71 @@ class LocalModelReviewer:
   timeout_seconds: int
   max_images: int
 
+  def _image_file_data_url(self, path: Path, max_dimension: int = 1280) -> str | None:
+    try:
+      with Image.open(path) as image:
+        image = image.convert("RGB")
+        image.thumbnail((max_dimension, max_dimension))
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=86, optimize=True)
+    except (OSError, ValueError):
+      return None
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/jpeg;base64,{encoded}"
+
   def _render_review_image(self, page: fitz.Page) -> str:
     pixmap = page.get_pixmap(matrix=fitz.Matrix(1.2, 1.2), alpha=False)
     encoded = base64.b64encode(pixmap.tobytes("png")).decode("ascii")
     return f"data:image/png;base64,{encoded}"
+
+  def _extract_video_frame_data_urls(self, path: Path, metadata: dict[str, object]) -> list[str]:
+    if self.max_images <= 0:
+      return []
+
+    duration = metadata.get("duration_seconds")
+    if isinstance(duration, str):
+      try:
+        duration = float(duration)
+      except ValueError:
+        duration = None
+
+    if isinstance(duration, (int, float)) and duration > 1:
+      timestamps = [0.1, duration / 2, max(0.1, duration - 0.25)]
+    else:
+      timestamps = [0.1]
+
+    frame_urls: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="ufo-video-frames-") as frame_dir:
+      for index, timestamp in enumerate(dict.fromkeys(round(value, 3) for value in timestamps)):
+        if len(frame_urls) >= self.max_images:
+          break
+        frame_path = Path(frame_dir) / f"frame-{index}.jpg"
+        try:
+          subprocess.run(
+              [
+                  "ffmpeg",
+                  "-y",
+                  "-ss",
+                  f"{timestamp:.3f}",
+                  "-i",
+                  str(path),
+                  "-frames:v",
+                  "1",
+                  "-q:v",
+                  "3",
+                  str(frame_path),
+              ],
+              check=True,
+              capture_output=True,
+              text=True,
+              timeout=30,
+          )
+        except (FileNotFoundError, subprocess.SubprocessError, TimeoutError):
+          continue
+        data_url = self._image_file_data_url(frame_path)
+        if data_url:
+          frame_urls.append(data_url)
+    return frame_urls
 
   def _select_review_pages(self, doc: fitz.Document, document_type: str) -> list[int]:
     if doc.page_count == 0 or self.max_images <= 0:
@@ -896,6 +1011,65 @@ class LocalModelReviewer:
     with urllib_request.urlopen(request, timeout=self.timeout_seconds) as response:
       return json.loads(response.read().decode("utf-8"))
 
+  def _parse_review_response(self, response: dict[str, object], resolver: "PlaceResolver") -> dict[str, object] | None:
+    choices = response.get("choices") or []
+    if not choices:
+      return None
+    message = choices[0].get("message") or {}
+    content_text = message.get("content")
+    payload = extract_json_object(content_text) if isinstance(content_text, str) else None
+    if not payload:
+      reasoning_text = message.get("reasoning_content")
+      payload = extract_json_object(reasoning_text) if isinstance(reasoning_text, str) else None
+    if not payload:
+      return None
+
+    review: dict[str, object] = {
+      "review_status": "reviewed",
+      "review_source": f"local_model:{self.model_name}",
+    }
+
+    summary = payload.get("summary_narrative")
+    if isinstance(summary, str) and normalize_space(summary):
+      review["summary_narrative"] = normalize_space(summary)
+
+    visual = payload.get("visual_observations")
+    if isinstance(visual, str) and normalize_space(visual):
+      review["visual_observations"] = normalize_space(visual)
+    else:
+      review["visual_observations"] = None
+
+    model_doc_type = payload.get("document_type")
+    if isinstance(model_doc_type, str) and model_doc_type in DOCUMENT_TYPE_LABELS:
+      review["document_type"] = model_doc_type
+
+    model_themes = payload.get("themes")
+    if isinstance(model_themes, list):
+      review["themes"] = [theme for theme in model_themes if isinstance(theme, str) and theme in THEME_KEYWORDS]
+
+    model_agencies = payload.get("agencies")
+    if isinstance(model_agencies, list):
+      cleaned_agencies = [normalize_space(item) for item in model_agencies if isinstance(item, str) and normalize_space(item)]
+      review["agencies"] = list(dict.fromkeys(cleaned_agencies))[:8]
+
+    model_evidence_category = normalize_evidence_category(payload.get("evidence_category"))
+    if model_evidence_category is not None:
+      review["evidence_category"] = model_evidence_category["label"]
+
+    location_label = payload.get("location_label")
+    if isinstance(location_label, str) and normalize_space(location_label):
+      resolved = resolver.resolve(location_label)
+      if resolved:
+        review["location"] = {
+          "label": resolved.label,
+          "latitude": resolved.latitude,
+          "longitude": resolved.longitude,
+          "match": resolved.match,
+          "kind": resolved.kind,
+        }
+
+    return review if "summary_narrative" in review else None
+
   def review_document(
     self,
     document: dict[str, object],
@@ -954,63 +1128,62 @@ class LocalModelReviewer:
     except (urllib_error.URLError, TimeoutError, json.JSONDecodeError):
       return None
 
-    choices = response.get("choices") or []
-    if not choices:
+    return self._parse_review_response(response, resolver)
+
+  def review_media_item(
+    self,
+    document: dict[str, object],
+    path: Path,
+    media_metadata: dict[str, object],
+    manifest_narrative: str,
+    extracted_text: str,
+    resolver: "PlaceResolver",
+  ) -> dict[str, object] | None:
+    media_type = str(document.get("media_type") or "media")
+    prompt_text = (
+      "You are reviewing a UFO/UAP archive media asset for a research dashboard. "
+      "Use the attached image or sampled video frames as primary evidence, and use the manifest text only as context. "
+      "For videos, the attached frames are samples from the clip; describe visible objects, sensor overlays, scene context, apparent motion cues only when the frames support them, and any uncertainty. "
+      "Do not invent conclusions about identity, speed, altitude, intent, or authenticity. "
+      "Return only a JSON object with these keys: summary_narrative, visual_observations, document_type, themes, agencies, location_label, evidence_category. "
+      f"document_type must be one of {sorted(DOCUMENT_TYPE_LABELS)}. "
+      f"themes must be chosen only from {sorted(THEME_KEYWORDS)}. "
+      f"evidence_category must be one of {[definition['label'] for definition in EVIDENCE_CATEGORY_DEFINITIONS]}. "
+      "summary_narrative must be 4 sentences covering who or source context, what is visible or audible in the asset, where, and significance. "
+      "visual_observations must be a concrete visual narrative of what is actually visible in the attached media, not a restatement of the manifest. "
+      "If the image or frames do not show a meaningful anomalous object, say so clearly.\n\n"
+      f"Filename: {document['filename']}\n"
+      f"Title: {document['title']}\n"
+      f"Media type: {media_type}\n"
+      f"Current date label hint: {document.get('date_label')}\n"
+      f"Current location hint: {document.get('location', {}).get('label') if document.get('location') else None}\n"
+      f"Current theme hints: {document.get('themes', [])}\n"
+      f"Current agency hints: {document.get('agencies', [])}\n"
+      f"Local media metadata: {json.dumps(media_metadata, ensure_ascii=False)}\n"
+      f"Manifest narrative/context: {manifest_narrative or '[no manifest narrative available]'}\n"
+      f"OCR/text extracted from the media: {extracted_text or '[no text extracted from media]'}"
+    )
+
+    image_urls: list[str] = []
+    if media_type == "image":
+      data_url = self._image_file_data_url(path)
+      if data_url:
+        image_urls.append(data_url)
+    elif media_type == "video":
+      image_urls.extend(self._extract_video_frame_data_urls(path, media_metadata))
+
+    if not image_urls:
       return None
-    message = choices[0].get("message") or {}
-    content_text = message.get("content")
-    payload = extract_json_object(content_text) if isinstance(content_text, str) else None
-    if not payload:
-      reasoning_text = message.get("reasoning_content")
-      payload = extract_json_object(reasoning_text) if isinstance(reasoning_text, str) else None
-    if not payload:
+
+    content: list[dict[str, object]] = [{"type": "text", "text": prompt_text}]
+    for data_url in image_urls[: self.max_images]:
+      content.append({"type": "image_url", "image_url": {"url": data_url}})
+
+    try:
+      response = self._chat([{"role": "user", "content": content}])
+    except (urllib_error.URLError, TimeoutError, json.JSONDecodeError):
       return None
-
-    review: dict[str, object] = {
-      "review_status": "reviewed",
-      "review_source": f"local_model:{self.model_name}",
-    }
-
-    summary = payload.get("summary_narrative")
-    if isinstance(summary, str) and normalize_space(summary):
-      review["summary_narrative"] = normalize_space(summary)
-
-    visual = payload.get("visual_observations")
-    if isinstance(visual, str) and normalize_space(visual):
-      review["visual_observations"] = normalize_space(visual)
-    else:
-      review["visual_observations"] = None
-
-    model_doc_type = payload.get("document_type")
-    if isinstance(model_doc_type, str) and model_doc_type in DOCUMENT_TYPE_LABELS:
-      review["document_type"] = model_doc_type
-
-    model_themes = payload.get("themes")
-    if isinstance(model_themes, list):
-      review["themes"] = [theme for theme in model_themes if isinstance(theme, str) and theme in THEME_KEYWORDS]
-
-    model_agencies = payload.get("agencies")
-    if isinstance(model_agencies, list):
-      cleaned_agencies = [normalize_space(item) for item in model_agencies if isinstance(item, str) and normalize_space(item)]
-      review["agencies"] = list(dict.fromkeys(cleaned_agencies))[:8]
-
-    model_evidence_category = normalize_evidence_category(payload.get("evidence_category"))
-    if model_evidence_category is not None:
-      review["evidence_category"] = model_evidence_category["label"]
-
-    location_label = payload.get("location_label")
-    if isinstance(location_label, str) and normalize_space(location_label):
-      resolved = resolver.resolve(location_label)
-      if resolved:
-        review["location"] = {
-          "label": resolved.label,
-          "latitude": resolved.latitude,
-          "longitude": resolved.longitude,
-          "match": resolved.match,
-          "kind": resolved.kind,
-        }
-
-    return review if "summary_narrative" in review else None
+    return self._parse_review_response(response, resolver)
 
   def review_corpus(self, documents: list[dict[str, object]]) -> dict[str, object] | None:
     summary_blocks: list[str] = []
@@ -1139,6 +1312,33 @@ def extract_date_label(text: str) -> str | None:
     return None
 
 
+def parse_manifest_date_label(value: str) -> str | None:
+    cleaned = normalize_space(value)
+    if not cleaned or cleaned.upper() == "N/A":
+        return None
+    if re.fullmatch(r"(?:early|mid|late)\s+(19[0-9]{2}|20[0-2][0-9])", cleaned, re.IGNORECASE):
+        return re.search(r"(19[0-9]{2}|20[0-2][0-9])", cleaned).group(1)
+    if re.fullmatch(
+        r"(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+"
+        r"(?:19[0-9]{2}|20[0-2][0-9])",
+        cleaned,
+        re.IGNORECASE,
+    ):
+        parsed_month = date_parser.parse(cleaned, fuzzy=True)
+        return parsed_month.strftime("%b %Y")
+    try:
+        parsed = date_parser.parse(cleaned, fuzzy=True)
+    except (ValueError, OverflowError):
+        return extract_date_label(cleaned)
+    if parsed.year > datetime.utcnow().year + 1:
+        parsed = parsed.replace(year=parsed.year - 100)
+    if re.fullmatch(r"\d{4}", cleaned):
+        return str(parsed.year)
+    if parsed.day == 1 and not re.search(r"\b\d{1,2}\b", cleaned.replace(str(parsed.year), "")):
+        return parsed.strftime("%b %Y")
+    return parsed.strftime("%b %d, %Y")
+
+
 def choose_excerpt(text: str, max_length: int = 320) -> str:
     if not text:
         return ""
@@ -1180,6 +1380,7 @@ def infer_who_statement(document_type: str, agencies: list[str], themes: list[st
         "Mission Report": "Who: operational aircrews, command staff, and reporting personnel appear to be the primary actors in this record.",
         "Incident Summary": "Who: witnesses, reporting officers, and follow-on investigators appear to be the main actors in this case file.",
         "Transcript": "Who: crew members and mission support personnel are the central voices in this transcript.",
+        "Video / Audio": "Who: aircrews, sensor operators, analysts, or mission personnel are the likely actors connected to this media item.",
         "Debrief / Reporting Form": "Who: pilots, range personnel, and debriefing officers appear to be the main actors in this file.",
         "Diplomatic Cable": "Who: diplomatic staff and government reporting channels are the main actors in this record.",
         "Email Correspondence": "Who: program staff and correspondence authors are the clearest actors in this exchange.",
@@ -1208,6 +1409,8 @@ def infer_significance_statement(
         significance_clauses.append("it gives researchers a comparable case summary for cross-incident pattern matching")
     if document_type == "Transcript":
         significance_clauses.append("it preserves near-contemporaneous testimony rather than later retellings")
+    if document_type == "Video / Audio":
+        significance_clauses.append("it preserves source media that can be compared against written reporting and witness descriptions")
     if document_type == "Diplomatic Cable":
         significance_clauses.append("it shows how unusual observations moved through official diplomatic channels")
     if document_type == "Debrief / Reporting Form":
@@ -1300,6 +1503,69 @@ def ocr_page(page: fitz.Page, dpi: int) -> str:
     return pytesseract.image_to_string(image, config="--psm 6")
 
 
+def ocr_image(path: Path) -> tuple[str, dict[str, object]]:
+  with Image.open(path) as image:
+    metadata = {
+        "image_width": image.width,
+        "image_height": image.height,
+        "image_mode": image.mode,
+    }
+    ocr_text = normalize_space(pytesseract.image_to_string(image.convert("RGB"), config="--psm 6"))
+  return ocr_text, metadata
+
+
+def probe_video(path: Path) -> dict[str, object]:
+  try:
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    payload = json.loads(result.stdout)
+  except (FileNotFoundError, subprocess.SubprocessError, json.JSONDecodeError, TimeoutError):
+    return {}
+
+  metadata: dict[str, object] = {}
+  streams = payload.get("streams")
+  if isinstance(streams, list):
+    video_stream = next((stream for stream in streams if isinstance(stream, dict) and stream.get("codec_type") == "video"), None)
+    audio_stream = next((stream for stream in streams if isinstance(stream, dict) and stream.get("codec_type") == "audio"), None)
+    if isinstance(video_stream, dict):
+      metadata["video_width"] = video_stream.get("width")
+      metadata["video_height"] = video_stream.get("height")
+      metadata["video_codec"] = video_stream.get("codec_name")
+    if isinstance(audio_stream, dict):
+      metadata["audio_codec"] = audio_stream.get("codec_name")
+
+  media_format = payload.get("format")
+  if isinstance(media_format, dict):
+    duration = media_format.get("duration")
+    if duration is not None:
+      try:
+        metadata["duration_seconds"] = float(duration)
+      except (TypeError, ValueError):
+        pass
+    size = media_format.get("size")
+    if size is not None:
+      try:
+        metadata["media_size_bytes"] = int(size)
+      except (TypeError, ValueError):
+        pass
+
+  return metadata
+
+
 class PlaceResolver:
     def __init__(self) -> None:
         self.aliases: dict[str, ResolvedLocation] = {}
@@ -1368,7 +1634,7 @@ def analyze_document(
     path: Path,
     resolver: PlaceResolver,
     source_dir: Path,
-  source_urls: dict[str, str],
+  source_manifest: dict[str, dict[str, object]],
     review_overrides: dict[str, dict[str, object]],
     reviewer: LocalModelReviewer | None,
   force_review_refresh: bool,
@@ -1377,6 +1643,7 @@ def analyze_document(
     ocr_dpi: int,
     min_native_chars: int,
 ) -> dict[str, object]:
+    source_metadata = source_manifest.get(path.name)
     doc = fitz.open(path)
     processed_pages = min(doc.page_count, page_limit) if page_limit else doc.page_count
     native_pages = 0
@@ -1447,7 +1714,9 @@ def analyze_document(
         "filename": path.name,
         "title": title,
         "relative_path": str(relative_path).replace("\\", "/"),
-      "original_source_url": source_urls.get(path.name),
+        "media_type": "pdf",
+        "original_source_url": original_source_url(source_metadata),
+        "thumbnail_url": source_thumbnail_url(source_metadata, "pdf"),
         "source_href": f"../data/sources/{path.name}",
         "document_type": document_type,
         "date_label": date_label,
@@ -1478,6 +1747,179 @@ def analyze_document(
     review = review_overrides.get(path.name)
     if reviewer is not None and (review is None or force_review_refresh or not review_has_evidence_category(review)):
       generated_review = reviewer.review_document(document, doc, combined_text, resolver)
+      if generated_review:
+        updated_review = dict(review) if isinstance(review, dict) else {}
+        updated_review.update(generated_review)
+        review_overrides[path.name] = updated_review
+        review = updated_review
+    return apply_review_override(document, review)
+
+
+def analyze_media_item(
+    path: Path,
+    resolver: PlaceResolver,
+    source_dir: Path,
+    source_manifest: dict[str, dict[str, object]],
+    review_overrides: dict[str, dict[str, object]],
+    reviewer: LocalModelReviewer | None,
+    force_review_refresh: bool,
+) -> dict[str, object]:
+    source_metadata = source_manifest.get(path.name) or {}
+    manifest_media_type = normalize_space(str(source_metadata.get("media_type") or "")).lower()
+    if manifest_media_type in {"image", "video"}:
+      media_type = manifest_media_type
+    elif path.suffix.lower() in IMAGE_EXTENSIONS:
+      media_type = "image"
+    else:
+      media_type = "video"
+
+    title = manifest_text(source_metadata, "title") or slug_title(path.stem)
+    narrative = manifest_text(
+        source_metadata,
+        "narrative",
+        "description_blurb",
+        "dvids_description",
+        "dvids_title",
+    )
+    date_sources = [
+        manifest_text(source_metadata, key)
+        for key in ("incident_date", "date_taken", "release_date", "date_published")
+    ]
+    date_source = " ".join(source for source in date_sources if source)
+    location_source = manifest_text(source_metadata, "incident_location")
+    agency_source = manifest_text(source_metadata, "agency")
+    media_metadata: dict[str, object] = {}
+    extracted_text = ""
+    visual_observations = None
+
+    if media_type == "image":
+      try:
+        extracted_text, media_metadata = ocr_image(path)
+      except (OSError, RuntimeError, ValueError):
+        extracted_text = ""
+        media_metadata = {}
+      document_type = "Imagery"
+      extraction_method = "image_ocr" if extracted_text else "image_metadata"
+      if media_metadata.get("image_width") and media_metadata.get("image_height"):
+        visual_observations = (
+            f"Still image asset with dimensions {media_metadata['image_width']} x {media_metadata['image_height']} pixels. "
+            f"{narrative}" if narrative else
+            f"Still image asset with dimensions {media_metadata['image_width']} x {media_metadata['image_height']} pixels."
+        )
+    else:
+      media_metadata = probe_video(path)
+      if "duration_seconds" not in media_metadata and source_metadata.get("duration_seconds") is not None:
+        media_metadata["duration_seconds"] = source_metadata.get("duration_seconds")
+      document_type = "Video / Audio"
+      extraction_method = "video_metadata"
+      duration = media_metadata.get("duration_seconds")
+      dimensions = ""
+      if media_metadata.get("video_width") and media_metadata.get("video_height"):
+        dimensions = f" at {media_metadata['video_width']} x {media_metadata['video_height']} pixels"
+      if isinstance(duration, (int, float)):
+        visual_observations = f"Short video/audio clip, {format_duration(float(duration))} long{dimensions}."
+      elif dimensions:
+        visual_observations = f"Short video clip{dimensions}."
+
+    combined_text = normalize_space(
+        " ".join(
+            item
+            for item in [
+                title,
+                narrative,
+                agency_source,
+                location_source,
+                date_source,
+                extracted_text,
+            ]
+            if item
+        )
+    )
+    date_label = (
+        next((label for label in (parse_manifest_date_label(source) for source in date_sources) if label), None)
+        or extract_date_label(title)
+        or extract_date_label(combined_text)
+    )
+    title_year_start, title_year_end, title_primary_year = extract_year_info(title)
+    if title_year_start is not None:
+      year_start, year_end, primary_year = title_year_start, title_year_end, title_primary_year
+    elif date_label:
+      year_start, year_end, primary_year = extract_year_info(date_label)
+    else:
+      year_start, year_end, primary_year = extract_year_info(combined_text)
+
+    observation = choose_excerpt(narrative or extracted_text or combined_text)
+    location = resolver.resolve(location_source) if location_source else None
+    if location is None:
+      location = resolver.resolve(title, observation)
+    themes = detect_themes(f"{title} {combined_text}")
+    if media_type in {"image", "video"} and "Imagery and Visuals" not in themes:
+      themes.append("Imagery and Visuals")
+    agencies = detect_agencies(f"{agency_source} {title} {combined_text}")
+    if agency_source and agency_source not in agencies:
+      agencies.insert(0, agency_source)
+    agencies = list(dict.fromkeys(agencies))[:8]
+    top_terms = [term for term, _ in Counter(tokenize(combined_text)).most_common(8)]
+
+    summary_narrative = build_summary_narrative(
+      document_type=document_type,
+      date_label=date_label,
+      location=location,
+      agencies=agencies,
+      themes=themes,
+      top_terms=top_terms,
+      extraction_method=extraction_method,
+      observation=observation,
+    )
+
+    relative_path = path.relative_to(source_dir.parent.parent)
+    document = {
+        "filename": path.name,
+        "title": title,
+        "relative_path": str(relative_path).replace("\\", "/"),
+        "media_type": media_type,
+        "original_source_url": original_source_url(source_metadata),
+        "thumbnail_url": source_thumbnail_url(source_metadata, media_type),
+        "source_href": f"../data/sources/{path.name}",
+        "source_page_url": manifest_text(source_metadata, "source_page_url") or None,
+        "document_type": document_type,
+        "date_label": date_label,
+        "year": primary_year,
+        "year_start": year_start,
+        "year_end": year_end,
+        "page_count": 0,
+        "processed_pages": 0,
+        "extraction_method": extraction_method,
+        "ocr_pages": 0,
+        "native_pages": 0,
+        "ocr_skipped_pages": 0,
+        "text_characters": cleaned_char_count(combined_text),
+        "summary_narrative": summary_narrative,
+        "visual_observations": visual_observations,
+        "themes": themes,
+        "agencies": agencies,
+        "top_terms": top_terms,
+        "media_metadata": media_metadata,
+        "location": {
+            "label": location.label,
+            "latitude": location.latitude,
+            "longitude": location.longitude,
+            "match": location.match,
+            "kind": location.kind,
+        }
+        if location
+        else None,
+    }
+    review = review_overrides.get(path.name)
+    if reviewer is not None and (review is None or force_review_refresh or not review_has_evidence_category(review)):
+      generated_review = reviewer.review_media_item(
+          document=document,
+          path=path,
+          media_metadata=media_metadata,
+          manifest_narrative=narrative,
+          extracted_text=extracted_text,
+          resolver=resolver,
+      )
       if generated_review:
         updated_review = dict(review) if isinstance(review, dict) else {}
         updated_review.update(generated_review)
@@ -1566,6 +2008,7 @@ def build_analysis(
     year_counts = Counter(doc["year"] for doc in documents if isinstance(doc.get("year"), int))
     type_counts = Counter(doc["document_type"] for doc in documents)
     method_counts = Counter(doc["extraction_method"] for doc in documents)
+    media_counts = Counter(str(doc.get("media_type") or "pdf") for doc in documents)
     evidence_category_counts = Counter(doc["evidence_category"] for doc in documents if isinstance(doc.get("evidence_category"), str))
     theme_counts = Counter(theme for doc in documents for theme in doc.get("themes", []))
     agency_counts = Counter(agency for doc in documents for agency in doc.get("agencies", []))
@@ -1595,6 +2038,7 @@ def build_analysis(
         "source_dir": str(source_dir),
         "document_count": len(documents),
         "total_pages": sum(int(doc["page_count"]) for doc in documents),
+        "media_counts": [{"label": label, "count": count} for label, count in sorted(media_counts.items())],
         "year_min": min(years) if years else None,
         "year_max": max(years) if years else None,
         "year_counts": [{"year": year, "count": count} for year, count in sorted(year_counts.items())],
@@ -2329,6 +2773,52 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       border-bottom-color: var(--teal);
     }}
 
+    .source-preview {{
+      margin-top: 12px;
+      border: 1px solid rgba(244, 239, 225, 0.12);
+      background: rgba(7, 8, 11, 0.34);
+    }}
+
+    .source-preview summary {{
+      cursor: pointer;
+      padding: 8px 10px;
+      color: var(--gold);
+      font-size: 0.72rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      list-style-position: inside;
+      user-select: none;
+    }}
+
+    .source-preview summary:hover,
+    .source-preview summary:focus-visible {{
+      outline: none;
+      color: var(--teal);
+    }}
+
+    .source-preview-link {{
+      display: grid;
+      gap: 8px;
+      padding: 0 10px 10px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.78rem;
+    }}
+
+    .source-preview-link:hover,
+    .source-preview-link:focus-visible {{
+      color: var(--teal);
+      outline: none;
+    }}
+
+    .source-thumbnail {{
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: cover;
+      border: 1px solid rgba(86, 214, 201, 0.16);
+      background: rgba(244, 239, 225, 0.05);
+    }}
+
     .tag-row {{
       display: flex;
       flex-wrap: wrap;
@@ -2620,7 +3110,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
 
     <div class=\"tab-strip\" role=\"tablist\" aria-label=\"Dashboard sections\">
       <button class=\"tab-button\" id=\"tab-overview\" type=\"button\" role=\"tab\" aria-selected=\"true\" aria-controls=\"panel-overview\" data-tab=\"overview\">Analysis</button>
-      <button class=\"tab-button\" id=\"tab-documents\" type=\"button\" role=\"tab\" aria-selected=\"false\" aria-controls=\"panel-documents\" data-tab=\"documents\" tabindex=\"-1\">Documents</button>
+      <button class=\"tab-button\" id=\"tab-documents\" type=\"button\" role=\"tab\" aria-selected=\"false\" aria-controls=\"panel-documents\" data-tab=\"documents\" tabindex=\"-1\">Sources</button>
     </div>
 
     <section class=\"tab-panel\" id=\"panel-overview\" role=\"tabpanel\" aria-labelledby=\"tab-overview\">
@@ -2636,7 +3126,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         </section>
 
         <section class=\"panel span-8\">
-          <h2>Document Timeline</h2>
+          <h2>Source Timeline</h2>
           <div id=\"timelineChart\" class=\"svg-wrap\"></div>
         </section>
 
@@ -2662,7 +3152,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         </section>
 
         <section class=\"panel span-4\">
-          <h2>Document Types</h2>
+          <h2>Source Types</h2>
           <div id=\"typeChart\" class=\"svg-wrap\"></div>
         </section>
 
@@ -2683,7 +3173,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         <label>Keyword Search
           <input id=\"searchInput\" type=\"search\" placeholder=\"Search titles, summaries, themes, agencies\">
         </label>
-        <label>Document Type
+        <label>Source Type
           <select id=\"typeFilter\"></select>
         </label>
         <label>Extraction Method
@@ -2709,12 +3199,12 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       </div>
 
       <section class=\"panel\" id=\"documentRegister\">
-        <h2>Document Register</h2>
+        <h2>Source Register</h2>
         <div class=\"table-wrap\">
           <table>
             <thead>
               <tr>
-                <th>Document</th>
+                <th>Source</th>
                 <th>Classification</th>
                 <th>Profile</th>
                 <th>Summary Narrative</th>
@@ -2727,14 +3217,14 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           <div id=\"paginationSummary\" class=\"pagination-summary\"></div>
           <div id=\"paginationControls\" class=\"pagination-controls\"></div>
         </div>
-        <div class=\"footer-note\">Rows marked with OCR page counts used image-based text recovery on low-text pages. Documents that hit the OCR cap may deserve a deeper rerun for exhaustive archival study.</div>
+        <div class=\"footer-note\">Rows marked with OCR page counts used image-based text recovery on low-text pages. Image and video rows use local media metadata plus release manifest narrative where available.</div>
       </section>
     </section>
 
     <footer class=\"site-footer\">
       <div>
         <div class=\"footer-kicker\">AI Processing Note</div>
-        <div>This dashboard uses AI to process public UAP/UFO records by extracting text with native PDF parsing and OCR where needed, then applying local AI review to summarize documents, classify evidence strength, identify themes, agencies, dates, and locations, and surface corpus-level research signals.</div>
+        <div>This dashboard uses AI to process public UAP/UFO records by extracting text with native PDF parsing and OCR where needed, reading local image/video metadata, then applying local AI review to summarize sources, classify evidence strength, identify themes, agencies, dates, and locations, and surface corpus-level research signals.</div>
       </div>
       <div>Maintained by <strong><a href=\"https://rittmuller.com\" target=\"_blank\" rel=\"noopener noreferrer\">Robert Rittmuller</a></strong>.</div>
     </footer>
@@ -2790,6 +3280,16 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       return [...counts.entries()].map(([label, count]) => ({ label, count }));
     }
 
+    function sourceHref(doc) {
+      return doc.original_source_url || doc.source_href || doc.source_page_url || '#';
+    }
+
+    function sourcePreviewLabel(doc) {
+      if (doc.media_type === 'video') return 'Video thumbnail';
+      if (doc.media_type === 'image') return 'Image thumbnail';
+      return 'Source thumbnail';
+    }
+
     function resetDocumentPage() {
       state.page = 1;
     }
@@ -2821,7 +3321,11 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     }
 
     function renderMeta() {
-      document.getElementById('metaDocs').textContent = `${analysis.document_count} documents`;
+      const mediaCounts = Object.fromEntries((analysis.media_counts || []).map((entry) => [entry.label, entry.count]));
+      const mediaTotal = (mediaCounts.image || 0) + (mediaCounts.video || 0);
+      document.getElementById('metaDocs').textContent = mediaTotal
+        ? `${analysis.document_count} sources, ${mediaTotal} media`
+        : `${analysis.document_count} sources`;
       document.getElementById('metaPages').textContent = `${analysis.total_pages} pages`;
       document.getElementById('metaYears').textContent = analysis.year_min && analysis.year_max
         ? `${analysis.year_min}–${analysis.year_max}`
@@ -2832,11 +3336,13 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     function renderMetrics(items) {
       const years = items.map((doc) => doc.year).filter(Boolean);
       const ocrDocs = items.filter((doc) => doc.extraction_method === 'ocr' || doc.extraction_method === 'hybrid').length;
+      const mediaItems = items.filter((doc) => doc.media_type === 'image' || doc.media_type === 'video').length;
       const located = items.filter((doc) => doc.location).length;
       const pages = items.reduce((sum, doc) => sum + (doc.page_count || 0), 0);
       const cards = [
-        { value: items.length, label: 'Documents in view' },
-        { value: pages, label: 'Pages represented' },
+        { value: items.length, label: 'Sources in view' },
+        { value: pages, label: 'PDF pages represented' },
+        { value: mediaItems, label: 'Image/video items' },
         { value: located, label: 'Resolved geolocations' },
         { value: ocrDocs, label: 'OCR-assisted files' },
         { value: years.length ? Math.min(...years) : '—', label: 'Earliest anchor year' },
@@ -3185,6 +3691,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
             ? 'category-two'
             : 'category-three';
         const tags = [
+          doc.media_type && doc.media_type !== 'pdf' ? doc.media_type.toUpperCase() : '',
           doc.document_type,
           doc.extraction_method.toUpperCase(),
           doc.review_status === 'reviewed' ? 'REVIEWED' : '',
@@ -3194,21 +3701,45 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           .filter(Boolean)
           .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
           .join('');
+        const mediaProfile = doc.media_type === 'image'
+          ? (() => {
+              const meta = doc.media_metadata || {};
+              return meta.image_width && meta.image_height ? `${meta.image_width} x ${meta.image_height} image` : 'Image file';
+            })()
+          : doc.media_type === 'video'
+            ? (() => {
+                const meta = doc.media_metadata || {};
+                const duration = typeof meta.duration_seconds === 'number' ? `${Math.round(meta.duration_seconds)} sec` : 'Video file';
+                const dimensions = meta.video_width && meta.video_height ? `${meta.video_width} x ${meta.video_height}` : '';
+                return dimensions ? `${duration} · ${dimensions}` : duration;
+              })()
+            : `${doc.page_count} pages`;
         const profile = [
           doc.date_label || (doc.year ? `${doc.year}` : 'Undated'),
           doc.location ? doc.location.label : 'No location resolved',
-          `${doc.page_count} pages`,
-          doc.ocr_pages ? `${doc.ocr_pages} OCR pages` : 'Native text',
+          mediaProfile,
+          (doc.media_type || 'pdf') === 'pdf' ? (doc.ocr_pages ? `${doc.ocr_pages} OCR pages` : 'Native text') : doc.extraction_method.replace('_', ' '),
           doc.ocr_skipped_pages ? `${doc.ocr_skipped_pages} OCR pages deferred` : '',
           doc.review_status === 'reviewed' ? 'Reviewed narrative' : '',
         ].filter(Boolean).join(' · ');
         const visualNote = doc.visual_observations
           ? `<div class="muted">Visual: ${escapeHtml(doc.visual_observations)}</div>`
           : '';
+        const href = sourceHref(doc);
+        const previewPanel = doc.thumbnail_url
+          ? `<details class="source-preview">
+              <summary>${escapeHtml(sourcePreviewLabel(doc))}</summary>
+              <a class="source-preview-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">
+                <img class="source-thumbnail" src="${escapeHtml(doc.thumbnail_url)}" alt="${escapeHtml(sourcePreviewLabel(doc))} for ${escapeHtml(doc.title)}" loading="lazy">
+                <span>Open source</span>
+              </a>
+            </details>`
+          : '';
         return `
           <tr>
-            <td data-label="Document">
-              <p class="doc-title"><a href="${escapeHtml(doc.original_source_url || doc.source_href)}">${escapeHtml(doc.title)}</a></p>
+            <td data-label="Source">
+              <p class="doc-title"><a href="${escapeHtml(href)}">${escapeHtml(doc.title)}</a></p>
+              ${previewPanel}
               <div class="tag-row">${tags}</div>
             </td>
             <td class="classification-cell" data-label="Classification">
@@ -3220,11 +3751,11 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           </tr>`;
       }).join('');
       const paginationSummary = totalItems
-        ? `Showing ${startIndex + 1}-${Math.min(startIndex + DOCUMENTS_PER_PAGE, totalItems)} of ${totalItems} documents`
-        : 'No documents in register';
-      document.getElementById('documentCount').textContent = `${totalItems} documents in register`;
+        ? `Showing ${startIndex + 1}-${Math.min(startIndex + DOCUMENTS_PER_PAGE, totalItems)} of ${totalItems} sources`
+        : 'No sources in register';
+      document.getElementById('documentCount').textContent = `${totalItems} sources in register`;
       document.getElementById('paginationSummary').textContent = paginationSummary;
-      document.getElementById('documentRows').innerHTML = rows || '<tr><td colspan="4">No documents match the current filters.</td></tr>';
+      document.getElementById('documentRows').innerHTML = rows || '<tr><td colspan="4">No sources match the current filters.</td></tr>';
       renderPaginationControls(totalItems, totalPages);
     }
 
@@ -3393,11 +3924,11 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     return template.replace("__DATA_JSON__", data_json).replace("__WORLD_LAND_JSON__", world_land_json)
 
 
-def iter_pdf_paths(source_dir: Path) -> Iterable[Path]:
-    return sorted(path for path in source_dir.iterdir() if path.is_file() and path.suffix.lower() == ".pdf")
+def iter_source_paths(source_dir: Path) -> Iterable[Path]:
+    return sorted(path for path in source_dir.iterdir() if path.is_file() and path.suffix.lower() in SUPPORTED_SOURCE_EXTENSIONS)
 
 
-def dedupe_pdf_paths(pdf_paths: list[Path], source_urls: dict[str, str]) -> tuple[list[Path], int]:
+def dedupe_source_paths(source_paths: list[Path], source_manifest: dict[str, dict[str, object]]) -> tuple[list[Path], int]:
   def sort_key(path: Path) -> tuple[int, int, str]:
     is_duplicate_suffix = 1 if re.search(r"-\d+$", path.stem) else 0
     return (is_duplicate_suffix, len(path.name), path.name.lower())
@@ -3406,8 +3937,8 @@ def dedupe_pdf_paths(pdf_paths: list[Path], source_urls: dict[str, str]) -> tupl
   seen_source_urls: set[str] = set()
   skipped = 0
 
-  for path in sorted(pdf_paths, key=sort_key):
-    source_url = source_urls.get(path.name)
+  for path in sorted(source_paths, key=sort_key):
+    source_url = original_source_url(source_manifest.get(path.name))
     if source_url and source_url in seen_source_urls:
       skipped += 1
       continue
@@ -3515,23 +4046,23 @@ def main() -> int:
             timeout_seconds=args.review_timeout,
             max_images=args.review_max_images,
         )
-    source_urls = load_source_manifest(args.source_manifest)
-    pdf_paths = list(iter_pdf_paths(source_dir))
-    pdf_paths, skipped_duplicate_paths = dedupe_pdf_paths(pdf_paths, source_urls)
+    source_manifest = load_source_manifest(args.source_manifest)
+    source_paths = list(iter_source_paths(source_dir))
+    source_paths, skipped_duplicate_paths = dedupe_source_paths(source_paths, source_manifest)
     if args.max_docs is not None:
-        pdf_paths = pdf_paths[: args.max_docs]
+        source_paths = source_paths[: args.max_docs]
 
     documents: list[dict[str, object]] = []
     cached_documents = 0
     analyzed_documents = 0
     review_file_updates = 0
-    progress = BuildProgressBar(total=len(pdf_paths), enabled=sys.stderr.isatty())
+    progress = BuildProgressBar(total=len(source_paths), enabled=sys.stderr.isatty())
 
-    for path in pdf_paths:
+    for path in source_paths:
         current_review = review_overrides.get(path.name)
         cache_file = document_cache_path(args.document_cache_dir, source_dir, path)
         cached_payload = None
-        if not args.refresh_document_cache and not args.refresh_reviews:
+        if path.suffix.lower() in PDF_EXTENSIONS and not args.refresh_document_cache and not args.refresh_reviews:
             cached_payload = load_document_cache(
                 cache_file=cache_file,
                 path=path,
@@ -3553,25 +4084,44 @@ def main() -> int:
                 review_overrides[path.name] = cached_review
                 write_review_overrides(args.review_file, review_overrides)
                 review_file_updates += 1
-            documents.append(cached_payload["document"])
+            cached_document = dict(cached_payload["document"])
+            if path.suffix.lower() in PDF_EXTENSIONS:
+                cached_document.setdefault("media_type", "pdf")
+            cached_document.setdefault("original_source_url", original_source_url(source_manifest.get(path.name)))
+            cached_document.setdefault(
+                "thumbnail_url",
+                source_thumbnail_url(source_manifest.get(path.name), str(cached_document.get("media_type") or "pdf")),
+            )
+            documents.append(cached_document)
             cached_documents += 1
             progress.advance(path, cached=True)
             continue
 
         review_count_before = len(review_overrides)
-        document = analyze_document(
-            path=path,
-            resolver=resolver,
-            source_dir=source_dir,
-          source_urls=source_urls,
-            review_overrides=review_overrides,
-            reviewer=reviewer,
-            force_review_refresh=args.refresh_reviews,
-            page_limit=args.page_limit,
-            ocr_max_pages_per_document=ocr_limit,
-            ocr_dpi=args.ocr_dpi,
-            min_native_chars=args.min_native_chars,
-        )
+        if path.suffix.lower() in PDF_EXTENSIONS:
+            document = analyze_document(
+                path=path,
+                resolver=resolver,
+                source_dir=source_dir,
+                source_manifest=source_manifest,
+                review_overrides=review_overrides,
+                reviewer=reviewer,
+                force_review_refresh=args.refresh_reviews,
+                page_limit=args.page_limit,
+                ocr_max_pages_per_document=ocr_limit,
+                ocr_dpi=args.ocr_dpi,
+                min_native_chars=args.min_native_chars,
+            )
+        else:
+            document = analyze_media_item(
+                path=path,
+                resolver=resolver,
+                source_dir=source_dir,
+                source_manifest=source_manifest,
+                review_overrides=review_overrides,
+                reviewer=reviewer,
+                force_review_refresh=args.refresh_reviews,
+            )
         documents.append(document)
         analyzed_documents += 1
         write_document_cache(
@@ -3621,10 +4171,12 @@ def main() -> int:
     args.output_json.write_text(json.dumps(analysis, indent=2, ensure_ascii=False), encoding="utf-8")
     args.output_html.write_text(render_dashboard_html(analysis), encoding="utf-8")
 
-    print(f"Analyzed {len(documents)} documents")
+    media_documents = sum(1 for document in documents if document.get("media_type") in {"image", "video"})
+    print(f"Analyzed {len(documents)} source items")
     print(f"Loaded {cached_documents} document analyses from cache")
     print(f"Processed {analyzed_documents} document analyses this run")
-    print(f"Skipped {skipped_duplicate_paths} duplicate PDF files based on original source URL")
+    print(f"Included {media_documents} image/video source items")
+    print(f"Skipped {skipped_duplicate_paths} duplicate source files based on original source URL")
     print(f"Updated review cache {review_file_updates} times")
     print(f"Wrote JSON to {args.output_json}")
     print(f"Wrote dashboard to {args.output_html}")
