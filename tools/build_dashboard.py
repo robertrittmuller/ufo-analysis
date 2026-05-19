@@ -435,7 +435,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
       "--review-model",
-      default="qwen3.6-35b-a3b-ud-mlx",
+      default="Qwen3.6-35B-A3B-UD-MLX-4bit",
       help="Model name to use for local multimodal review generation.",
     )
     parser.add_argument(
