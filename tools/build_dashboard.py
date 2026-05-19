@@ -439,6 +439,11 @@ def parse_args() -> argparse.Namespace:
       help="Model name to use for local multimodal review generation.",
     )
     parser.add_argument(
+      "--review-api-key",
+      default="REDACTED",
+      help="API key for authenticating with the local model endpoint.",
+    )
+    parser.add_argument(
       "--review-timeout",
       type=int,
       default=300,
@@ -525,6 +530,36 @@ def load_review_overrides(review_file: Path) -> dict[str, dict[str, object]]:
       continue
     overrides[filename] = review
   return overrides
+
+
+def legacy_review_filename_candidates(filename: str) -> list[str]:
+  candidates = [filename]
+  replacements = (
+    (r"(?<=DOW-UAP-D)0+(\d+)", r"\1"),
+    (r"(?<=DOW-UAP-PR)0+(\d+)", r"\1"),
+    (r"(?<=NASA-UAP-D)0+(\d+)", r"\1"),
+    (r"(?<=NASA-UAP-VM)0+(\d+)", r"\1"),
+    (r"(?<=FBI_Photo_[AB])0+(\d+)", r"\1"),
+    (r"(?<=State_Department_UAP_Cable_)0+(\d+)", r"\1"),
+    (r"(?<=_Section_)0+(\d+)", r"\1"),
+    (r"(?<=_Serial_)0+(\d+)", r"\1"),
+  )
+
+  for pattern, replacement in replacements:
+    for candidate in tuple(candidates):
+      legacy_candidate = re.sub(pattern, replacement, candidate)
+      if legacy_candidate not in candidates:
+        candidates.append(legacy_candidate)
+
+  return candidates
+
+
+def find_review_override(review_overrides: dict[str, dict[str, object]], filename: str) -> dict[str, object] | None:
+  for candidate in legacy_review_filename_candidates(filename):
+    review = review_overrides.get(candidate)
+    if review is not None:
+      return review
+  return None
 
 
 def write_review_overrides(review_file: Path, overrides: dict[str, dict[str, object]]) -> None:
@@ -833,6 +868,7 @@ class LocalModelReviewer:
   model_name: str
   timeout_seconds: int
   max_images: int
+  api_key: str | None = None
 
   def _image_file_data_url(self, path: Path, max_dimension: int = 1280) -> str | None:
     try:
@@ -1002,10 +1038,16 @@ class LocalModelReviewer:
       "temperature": 0,
       "max_tokens": max_tokens,
     }
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if self.api_key:
+      headers["Authorization"] = f"Bearer {self.api_key}"
+    base_url = self.base_url.rstrip("/")
+    if not base_url.endswith("/v1"):
+      base_url = f"{base_url}/v1"
     request = urllib_request.Request(
-      url=f"{self.base_url.rstrip('/')}/v1/chat/completions",
+      url=f"{base_url}/chat/completions",
       data=json.dumps(payload).encode("utf-8"),
-      headers={"Content-Type": "application/json"},
+      headers=headers,
       method="POST",
     )
     with urllib_request.urlopen(request, timeout=self.timeout_seconds) as response:
@@ -1744,7 +1786,7 @@ def analyze_document(
         if location
         else None,
     }
-    review = review_overrides.get(path.name)
+    review = find_review_override(review_overrides, path.name)
     if reviewer is not None and (review is None or force_review_refresh or not review_has_evidence_category(review)):
       generated_review = reviewer.review_document(document, doc, combined_text, resolver)
       if generated_review:
@@ -1910,7 +1952,7 @@ def analyze_media_item(
         if location
         else None,
     }
-    review = review_overrides.get(path.name)
+    review = find_review_override(review_overrides, path.name)
     if reviewer is not None and (review is None or force_review_refresh or not review_has_evidence_category(review)):
       generated_review = reviewer.review_media_item(
           document=document,
@@ -4045,6 +4087,7 @@ def main() -> int:
             model_name=args.review_model,
             timeout_seconds=args.review_timeout,
             max_images=args.review_max_images,
+            api_key=args.review_api_key,
         )
     source_manifest = load_source_manifest(args.source_manifest)
     source_paths = list(iter_source_paths(source_dir))
@@ -4059,7 +4102,7 @@ def main() -> int:
     progress = BuildProgressBar(total=len(source_paths), enabled=sys.stderr.isatty())
 
     for path in source_paths:
-        current_review = review_overrides.get(path.name)
+        current_review = find_review_override(review_overrides, path.name)
         cache_file = document_cache_path(args.document_cache_dir, source_dir, path)
         cached_payload = None
         if path.suffix.lower() in PDF_EXTENSIONS and not args.refresh_document_cache and not args.refresh_reviews:

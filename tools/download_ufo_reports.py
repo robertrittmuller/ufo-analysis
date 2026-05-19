@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover - depends on local environment
 
 
 START_URL = "https://www.war.gov/ufo/"
-CSV_URL = "https://www.war.gov/Portals/1/Interactive/2026/UFO/uap-csv.csv"
+CSV_URL = "https://www.war.gov/Portals/1/Interactive/2026/UFO/uap-release001.csv"
 DVIDS_ASSET_URL = "https://api.dvidshub.net/asset"
 DVIDS_VIDEO_PAGE_URL = "https://www.war.gov/Multimedia/Videos?videoid="
 DEFAULT_DVIDS_API_KEY = "key-68bb60d16b35e"
