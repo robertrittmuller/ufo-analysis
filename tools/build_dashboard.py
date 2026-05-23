@@ -340,6 +340,201 @@ THEME_KEYWORDS = {
     "Anomalous Objects": ["disc", "orb", "light", "sphere", "glow", "object", "unresolved"],
 }
 
+CAPABILITY_DEFINITIONS = (
+  {
+    "key": "instant_acceleration",
+    "label": "Instant Acceleration",
+    "group": "Maneuver",
+    "description": "Observed rapid acceleration, sudden departure, or high-speed transit.",
+    "keywords": (
+      "instant acceleration",
+      "instantaneous acceleration",
+      "rapid acceleration",
+      "accelerated rapidly",
+      "sudden acceleration",
+      "rapidly exits",
+      "exits the frame",
+      "fast moving",
+      "high speed",
+      "supersonic",
+      "extreme speed",
+      "shot across",
+    ),
+  },
+  {
+    "key": "abrupt_vector_change",
+    "label": "Abrupt Vector Change",
+    "group": "Maneuver",
+    "description": "Observed sharp turns, corkscrews, erratic movement, or non-ballistic path changes.",
+    "keywords": (
+      "90-degree",
+      "ninety-degree",
+      "right-angle",
+      "abrupt turn",
+      "sharp turn",
+      "directional change",
+      "changed direction",
+      "erratic movement",
+      "corkscrew",
+      "zigzag",
+      "maneuver",
+      "non-ballistic",
+    ),
+  },
+  {
+    "key": "stationary_hover",
+    "label": "Stationary Hover",
+    "group": "Maneuver",
+    "description": "Observed hover, loiter, stationary hold, or slow movement without apparent lift surfaces.",
+    "keywords": (
+      "hover",
+      "hovering",
+      "stationary",
+      "remained fixed",
+      "motionless",
+      "loiter",
+      "slow moving",
+      "sustained position",
+      "held position",
+    ),
+  },
+  {
+    "key": "formation_behavior",
+    "label": "Formation Behavior",
+    "group": "Coordination",
+    "description": "Observed multiple objects moving together, swarming, or holding a geometric arrangement.",
+    "keywords": (
+      "formation",
+      "formations",
+      "multiple objects",
+      "several objects",
+      "swarm",
+      "swarmed",
+      "t-configuration",
+      "cluster",
+      "group of",
+      "dual uap",
+      "three fast",
+      "4 uap",
+    ),
+  },
+  {
+    "key": "transmedium",
+    "label": "Transmedium / USO",
+    "group": "Environment",
+    "description": "Observed interaction with water or movement between aerial and maritime environments.",
+    "keywords": (
+      "uso",
+      "transmedium",
+      "in and out of water",
+      "entered the water",
+      "exited the water",
+      "submerged",
+      "underwater",
+      "over water",
+      "near sub",
+      "maritime",
+    ),
+  },
+  {
+    "key": "obscuration_traversal",
+    "label": "Obscuration Traversal",
+    "group": "Environment",
+    "description": "Observed movement through clouds, haze, or obscured environments while remaining trackable.",
+    "keywords": (
+      "cloud",
+      "clouds",
+      "in and out of clouds",
+      "through clouds",
+      "obscured",
+      "haze",
+      "low contrast",
+      "intermittently passes in and out",
+      "passes in and out",
+    ),
+  },
+  {
+    "key": "thermal_or_luminous",
+    "label": "Thermal / Luminous Signature",
+    "group": "Signature",
+    "description": "Observed heat, infrared contrast, bright light, glow, pulsing, flame, or orb-like luminosity.",
+    "keywords": (
+      "infrared",
+      "ir hot",
+      "thermal",
+      "bright object",
+      "bright area",
+      "area of contrast",
+      "glow",
+      "glowing",
+      "orange orb",
+      "orb",
+      "orbs",
+      "pulsing",
+      "flame",
+      "luminous",
+      "light source",
+    ),
+  },
+  {
+    "key": "sensor_tracked",
+    "label": "Sensor Tracked",
+    "group": "Evidence",
+    "description": "Observed through radar, FLIR, infrared, electro-optical, LiDAR, or other sensor tracking.",
+    "keywords": (
+      "radar",
+      "sensor",
+      "tracked",
+      "tracking",
+      "track",
+      "flir",
+      "tflir",
+      "infrared sensor",
+      "electro-optical",
+      "lidar",
+      "crosshair",
+      "targeting pod",
+    ),
+  },
+  {
+    "key": "physical_trace",
+    "label": "Physical Trace",
+    "group": "Evidence",
+    "description": "Observed physical residue, ground effect, indentation, debris, or other trace evidence.",
+    "keywords": (
+      "physical trace",
+      "physical evidence",
+      "indentations",
+      "burned vegetation",
+      "burned grass",
+      "residue",
+      "debris",
+      "fragments",
+      "ground evidence",
+      "landing marks",
+    ),
+  },
+  {
+    "key": "low_observable",
+    "label": "Low Observable",
+    "group": "Signature",
+    "description": "Observed faint, diffuse, low-contrast, silent, or intermittently visible behavior.",
+    "keywords": (
+      "low observable",
+      "low-contrast",
+      "low contrast",
+      "diffuse",
+      "faint",
+      "no distinct object",
+      "silent",
+      "no sound",
+      "intermittently",
+      "vague area",
+      "grainy",
+    ),
+  },
+)
+
 AGENCY_PATTERNS = {
     "FBI": ["fbi"],
     "NASA": ["nasa", "apollo", "gemini", "skylab"],
@@ -915,6 +1110,99 @@ def annotate_evidence_classification(document: dict[str, object]) -> dict[str, o
   annotated["evidence_category_rank"] = category["rank"]
   annotated["evidence_category_description"] = category["description"]
   return annotated
+
+
+def document_capability_text(document: dict[str, object]) -> str:
+  parts: list[str] = []
+  for key in (
+      "title",
+      "summary_narrative",
+      "visual_observations",
+      "audio_source_characterization",
+      "audio_transcript_summary",
+  ):
+    value = document.get(key)
+    if isinstance(value, str):
+      parts.append(value)
+  for key in ("themes", "agencies", "top_terms"):
+    value = document.get(key)
+    if isinstance(value, list):
+      parts.extend(str(item) for item in value if isinstance(item, str))
+  return normalize_space(" ".join(parts)).lower()
+
+
+def infer_document_capabilities(document: dict[str, object]) -> list[dict[str, object]]:
+  text = document_capability_text(document)
+  if not text:
+    return []
+
+  capabilities: list[dict[str, object]] = []
+  for definition in CAPABILITY_DEFINITIONS:
+    keywords = definition["keywords"]
+    hits = [keyword for keyword in keywords if keyword in text]
+    score = len(hits)
+    if definition["key"] == "sensor_tracked" and "Sensors and Radar" in document.get("themes", []):
+      score += 1
+    if score <= 0:
+      continue
+    capabilities.append(
+      {
+        "key": definition["key"],
+        "label": definition["label"],
+        "group": definition["group"],
+        "description": definition["description"],
+        "score": score,
+      }
+    )
+
+  return sorted(capabilities, key=lambda item: (-int(item["score"]), str(item["label"])))[:5]
+
+
+def annotate_capabilities(document: dict[str, object]) -> dict[str, object]:
+  annotated = dict(document)
+  capabilities = infer_document_capabilities(annotated)
+  annotated["capabilities"] = capabilities
+  annotated["capability_labels"] = [str(capability["label"]) for capability in capabilities]
+  annotated["capability_keys"] = [str(capability["key"]) for capability in capabilities]
+  annotated["capability_profile"] = " + ".join(annotated["capability_labels"][:2]) if capabilities else "No capability label"
+  return annotated
+
+
+def build_capability_matrix(documents: list[dict[str, object]]) -> list[dict[str, object]]:
+  matrix: list[dict[str, object]] = []
+  for definition in CAPABILITY_DEFINITIONS:
+    matching_documents = [
+      document
+      for document in documents
+      if definition["key"] in document.get("capability_keys", [])
+    ]
+    if not matching_documents:
+      continue
+    evidence_counts = Counter(
+      document.get("evidence_category")
+      for document in matching_documents
+      if isinstance(document.get("evidence_category"), str)
+    )
+    matrix.append(
+      {
+        "key": definition["key"],
+        "label": definition["label"],
+        "group": definition["group"],
+        "description": definition["description"],
+        "count": len(matching_documents),
+        "category_counts": [
+          {
+            "label": evidence_definition["label"],
+            "rank": evidence_definition["rank"],
+            "count": evidence_counts.get(evidence_definition["label"], 0),
+          }
+          for evidence_definition in EVIDENCE_CATEGORY_DEFINITIONS
+        ],
+        "reviewed_count": sum(1 for document in matching_documents if document.get("review_status") == "reviewed"),
+        "media_count": sum(1 for document in matching_documents if document.get("media_type") in MEDIA_TYPES),
+      }
+    )
+  return sorted(matrix, key=lambda item: (-int(item["count"]), str(item["label"])))
 
 
 def extract_json_object(text: str) -> dict[str, object] | None:
@@ -2665,6 +2953,11 @@ def build_research_signals(documents: list[dict[str, object]]) -> list[str]:
         theme_a, theme_b = leading_themes
         signals.append(f"The two most persistent research themes are {theme_a.lower()} and {theme_b.lower()}, suggesting the corpus clusters around both operational reporting and anomaly characterization.")
 
+    capabilities = Counter(label for doc in documents for label in doc.get("capability_labels", []))
+    if capabilities:
+      leading_capability, leading_count = capabilities.most_common(1)[0]
+      signals.append(f"The most common observed capability label is {leading_capability.lower()}, appearing in {leading_count} sources.")
+
     evidence_categories = Counter(doc["evidence_category"] for doc in documents if isinstance(doc.get("evidence_category"), str))
     if evidence_categories:
       leading_label, leading_count = evidence_categories.most_common(1)[0]
@@ -2859,6 +3152,7 @@ def build_analysis(
     source_dir: Path,
     executive_summary: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    documents = [annotate_capabilities(document) for document in documents]
     public_documents = [sanitize_dashboard_document(document) for document in documents]
     public_executive_summary = sanitize_dashboard_value(executive_summary) if executive_summary else None
     year_counts = Counter(doc["year"] for doc in documents if isinstance(doc.get("year"), int))
@@ -2913,6 +3207,16 @@ def build_analysis(
         "agency_counts": [{"label": label, "count": count} for label, count in agency_counts.most_common()],
         "keyword_counts": [{"term": term, "count": count} for term, count in keyword_counts.most_common(28)],
         "hotspots": sorted(hotspots.values(), key=lambda item: item["count"], reverse=True),
+        "capability_definitions": [
+          {
+            "key": definition["key"],
+            "label": definition["label"],
+            "group": definition["group"],
+            "description": definition["description"],
+          }
+          for definition in CAPABILITY_DEFINITIONS
+        ],
+        "capability_matrix": build_capability_matrix(documents),
         "research_signals": build_research_signals(documents),
         "executive_summary": public_executive_summary,
         "documents": public_documents,
@@ -3524,7 +3828,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     .theme-grid,
     .signal-list,
     .keyword-cloud,
-    .hotspot-list {{
+    .capability-matrix {{
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
@@ -3548,6 +3852,74 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       background: rgba(7, 8, 11, 0.46);
       color: #d9deea;
       line-height: 1.55;
+    }}
+
+    .capability-matrix {{
+      display: grid;
+      gap: 9px;
+    }}
+
+    .capability-row {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) repeat(3, minmax(28px, 34px)) minmax(34px, 44px);
+      gap: 6px;
+      align-items: stretch;
+      width: 100%;
+      min-width: 0;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(244, 239, 225, 0.09);
+    }}
+
+    .capability-row.header {{
+      padding-top: 0;
+      color: var(--muted);
+      font-size: 0.68rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }}
+
+    .capability-label {{
+      min-width: 0;
+      display: grid;
+      gap: 3px;
+    }}
+
+    .capability-label strong {{
+      color: var(--ink);
+      font-size: 0.84rem;
+      line-height: 1.24;
+      overflow-wrap: anywhere;
+    }}
+
+    .capability-label span {{
+      color: var(--muted);
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }}
+
+    .capability-cell,
+    .capability-total {{
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(244, 239, 225, 0.1);
+      background: rgba(244, 239, 225, 0.04);
+      color: var(--ink);
+      font-size: 0.78rem;
+      font-weight: 700;
+    }}
+
+    .capability-cell {{
+      background: rgba(86, 214, 201, var(--intensity, 0.06));
+      border-color: rgba(86, 214, 201, 0.18);
+    }}
+
+    .capability-total {{
+      color: var(--gold);
+      background: rgba(214, 168, 79, 0.1);
+      border-color: rgba(214, 168, 79, 0.2);
     }}
 
     .keyword {{
@@ -3754,6 +4126,11 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     .signal.chart-click-target:hover,
     .signal.chart-click-target:focus-visible {{
       border-left-color: var(--gold);
+    }}
+
+    .capability-row.chart-click-target:hover,
+    .capability-row.chart-click-target:focus-visible {{
+      border-bottom-color: rgba(86, 214, 201, 0.34);
     }}
 
     .chart-click-target:focus-visible circle {{
@@ -4003,8 +4380,8 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         </section>
 
         <section class=\"panel span-4\">
-          <h2>Location Hotspots</h2>
-          <div id=\"hotspots\" class=\"hotspot-list\"></div>
+          <h2>Observed Capabilities</h2>
+          <div id=\"capabilityMatrix\" class=\"capability-matrix\"></div>
         </section>
 
         <section class=\"panel span-4\">
@@ -4037,6 +4414,9 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         </label>
         <label>Evidence Category
           <select id="categoryFilter"></select>
+        </label>
+        <label>Observed Capability
+          <select id="capabilityFilter"></select>
         </label>
         <label>Geography
           <select id=\"placeFilter\"></select>
@@ -4100,6 +4480,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       type: 'all',
       method: 'all',
       category: 'all',
+      capability: 'all',
       place: 'all',
       yearMin: analysis.year_min || 1900,
       yearMax: analysis.year_max || new Date().getFullYear(),
@@ -4204,6 +4585,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         if (state.type !== 'all' && doc.document_type !== state.type) return false;
         if (state.method !== 'all' && doc.extraction_method !== state.method) return false;
         if (state.category !== 'all' && doc.evidence_category !== state.category) return false;
+        if (state.capability !== 'all' && !(doc.capability_keys || []).includes(state.capability)) return false;
         if (state.place !== 'all' && (!doc.location || doc.location.label !== state.place)) return false;
         if (year && year < state.yearMin) return false;
         if (year && year > state.yearMax) return false;
@@ -4219,6 +4601,8 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           ...(doc.top_terms || []),
           doc.evidence_category || '',
           doc.evidence_category_description || '',
+          doc.capability_profile || '',
+          ...(doc.capability_labels || []),
           doc.location ? doc.location.label : '',
         ].join(' ').toLowerCase();
         return haystack.includes(search);
@@ -4460,6 +4844,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       const years = items.map((doc) => doc.year).filter(Boolean);
       const hotspots = countBy(items.filter((doc) => doc.location), (doc) => doc.location.label).sort((a, b) => b.count - a.count);
       const themes = countBy(items.flatMap((doc) => (doc.themes || []).map((theme) => ({ theme }))), (entry) => entry.theme).sort((a, b) => b.count - a.count);
+      const capabilities = countBy(items.flatMap((doc) => (doc.capabilities || []).map((capability) => capability)), (entry) => entry.label).sort((a, b) => b.count - a.count);
       const signals = [];
       if (years.length) {
         const counts = countBy(items.filter((doc) => doc.year), (doc) => doc.year).sort((a, b) => b.count - a.count);
@@ -4478,6 +4863,13 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         signals.push({
           text: `The leading themes are ${themes.slice(0, 2).map((entry) => entry.label.toLowerCase()).join(' and ')}.`,
           filters: { search: themes[0].label },
+        });
+      }
+      if (capabilities.length) {
+        const definition = (analysis.capability_definitions || []).find((item) => item.label === capabilities[0].label);
+        signals.push({
+          text: `Observed capability labeling is led by ${capabilities[0].label.toLowerCase()}.`,
+          filters: definition ? { capability: definition.key } : { search: capabilities[0].label },
         });
       }
       document.getElementById('researchSignals').innerHTML = signals.map((signal, index) => `<div class="signal chart-click-target" data-signal-index="${index}" role="button" tabindex="0" aria-label="Filter documents for this research signal">${escapeHtml(signal.text)}</div>`).join('');
@@ -4547,6 +4939,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         type: 'all',
         method: 'all',
         category: 'all',
+        capability: 'all',
         place: 'all',
         yearMin: analysis.year_min || 1900,
         yearMax: analysis.year_max || new Date().getFullYear(),
@@ -4558,6 +4951,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       document.getElementById('typeFilter').value = state.type;
       document.getElementById('methodFilter').value = state.method;
       document.getElementById('categoryFilter').value = state.category;
+      document.getElementById('capabilityFilter').value = state.capability;
       document.getElementById('placeFilter').value = state.place;
       document.getElementById('yearMin').value = state.yearMin;
       document.getElementById('yearMax').value = state.yearMax;
@@ -4573,14 +4967,54 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       });
     }
 
-    function renderHotspots(items) {
-      const hotspots = countBy(items.filter((doc) => doc.location), (doc) => doc.location.label)
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 10);
-      document.getElementById('hotspots').innerHTML = hotspots.length
-        ? hotspots.map((entry) => `<div class="hotspot chart-click-target" data-place="${escapeHtml(entry.label)}" role="button" tabindex="0" aria-label="Filter documents to ${escapeHtml(entry.label)}"><span>${escapeHtml(entry.label)}</span><strong>${entry.count}</strong></div>`).join('')
-        : '<p class="chart-note">No location clusters match the current filters.</p>';
-      bindChartFilterTargets('#hotspots [data-place]', (element) => openDocumentsWithFilters({ place: element.dataset.place }));
+    function renderCapabilityMatrix(items) {
+      const definitions = analysis.capability_definitions || [];
+      const categories = (analysis.evidence_category_counts || []).slice().sort((a, b) => a.rank - b.rank);
+      const entries = definitions
+        .map((definition) => {
+          const matching = items.filter((doc) => (doc.capability_keys || []).includes(definition.key));
+          const categoryCounts = categories.map((category) => ({
+            ...category,
+            count: matching.filter((doc) => doc.evidence_category === category.label).length,
+          }));
+          return {
+            ...definition,
+            count: matching.length,
+            category_counts: categoryCounts,
+          };
+        })
+        .filter((entry) => entry.count > 0)
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+        .slice(0, 8);
+      const node = document.getElementById('capabilityMatrix');
+      if (!entries.length) {
+        node.innerHTML = '<p class="chart-note">No observed capabilities were inferred from this corpus.</p>';
+        return;
+      }
+      const maxCount = Math.max(...entries.flatMap((entry) => entry.category_counts.map((category) => category.count)), 1);
+      const header = `
+        <div class="capability-row header" aria-hidden="true">
+          <div>Capability</div>
+          ${categories.map((category) => `<div title="${escapeHtml(category.label)}">C${category.rank}</div>`).join('')}
+          <div>Total</div>
+        </div>`;
+      const rows = entries.map((entry) => {
+        const cells = entry.category_counts.map((category) => {
+          const intensity = category.count ? Math.min(0.42, 0.08 + (category.count / maxCount) * 0.34).toFixed(2) : '0.04';
+          return `<div class="capability-cell" style="--intensity: ${intensity}" title="${escapeHtml(category.label)}: ${category.count}">${category.count || ''}</div>`;
+        }).join('');
+        return `
+          <div class="capability-row chart-click-target" data-capability="${escapeHtml(entry.key)}" role="button" tabindex="0" aria-label="Filter documents to ${escapeHtml(entry.label)}">
+            <div class="capability-label">
+              <strong>${escapeHtml(entry.label)}</strong>
+              <span>${escapeHtml(entry.group)}</span>
+            </div>
+            ${cells}
+            <div class="capability-total">${entry.count}</div>
+          </div>`;
+      }).join('');
+      node.innerHTML = header + rows;
+      bindChartFilterTargets('#capabilityMatrix [data-capability]', (element) => openDocumentsWithFilters({ capability: element.dataset.capability }));
     }
 
     function renderDocuments(items) {
@@ -4600,6 +5034,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           doc.document_type,
           doc.extraction_method.toUpperCase(),
           doc.review_status === 'reviewed' ? 'REVIEWED' : '',
+          ...(doc.capability_labels || []).slice(0, 2),
           ...(doc.themes || []).slice(0, 3),
           ...(doc.agencies || []).slice(0, 2),
         ]
@@ -4624,6 +5059,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           doc.date_label || (doc.year ? `${doc.year}` : 'Undated'),
           doc.location ? doc.location.label : 'No location resolved',
           mediaProfile,
+          doc.capability_profile && doc.capability_profile !== 'No capability label' ? doc.capability_profile : '',
           (doc.media_type || 'pdf') === 'pdf' ? (doc.ocr_pages ? `${doc.ocr_pages} OCR pages` : 'Native text') : doc.extraction_method.replace('_', ' '),
           doc.ocr_skipped_pages ? `${doc.ocr_skipped_pages} OCR pages deferred` : '',
           doc.review_status === 'reviewed' ? 'Reviewed narrative' : '',
@@ -4762,18 +5198,23 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       renderThemes(analysisItems);
       renderOrganizations(analysisItems);
       renderClassifications(analysisItems);
-      renderHotspots(analysisItems);
+      renderCapabilityMatrix(analysisItems);
       renderDocuments(documentItems);
     }
 
     function populateFilter(select, label, values) {
-      select.innerHTML = `<option value="all">All ${escapeHtml(label)}</option>` + values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('');
+      select.innerHTML = `<option value="all">All ${escapeHtml(label)}</option>` + values.map((item) => {
+        const value = typeof item === 'object' ? item.value : item;
+        const optionLabel = typeof item === 'object' ? item.label : item;
+        return `<option value="${escapeHtml(value)}">${escapeHtml(optionLabel)}</option>`;
+      }).join('');
     }
 
     function initFilters() {
       populateFilter(document.getElementById('typeFilter'), 'types', [...new Set(documents.map((doc) => doc.document_type))].sort());
       populateFilter(document.getElementById('methodFilter'), 'methods', [...new Set(documents.map((doc) => doc.extraction_method))].sort());
       populateFilter(document.getElementById('categoryFilter'), 'categories', analysis.evidence_category_counts.map((entry) => entry.label));
+      populateFilter(document.getElementById('capabilityFilter'), 'capabilities', (analysis.capability_definitions || []).filter((definition) => (analysis.capability_matrix || []).some((entry) => entry.key === definition.key)).map((definition) => ({ label: definition.label, value: definition.key })));
       populateFilter(document.getElementById('placeFilter'), 'locations', [...new Set(documents.filter((doc) => doc.location).map((doc) => doc.location.label))].sort());
       document.getElementById('yearMin').value = state.yearMin;
       document.getElementById('yearMax').value = state.yearMax;
@@ -4795,6 +5236,11 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       }});
       document.getElementById('categoryFilter').addEventListener('change', (event) => {{
         state.category = event.target.value;
+        resetDocumentPage();
+        updateDashboard();
+      }});
+      document.getElementById('capabilityFilter').addEventListener('change', (event) => {{
+        state.capability = event.target.value;
         resetDocumentPage();
         updateDashboard();
       }});
