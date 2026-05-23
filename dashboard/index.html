@@ -3,7 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>UAP/UFO Research</title>
+  <title>UAP/UFO Research Dashboard | Public Government Records Analysis</title>
+  <meta name="description" content="Explore an AI-assisted analysis of public UAP and UFO government records, including source timelines, evidence classification, observed capabilities, agencies, locations, and source summaries.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://ufo-analysis.rittmuller.com/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="UAP/UFO Research Dashboard">
+  <meta property="og:title" content="UAP/UFO Research Dashboard | Public Government Records Analysis">
+  <meta property="og:description" content="Explore an AI-assisted analysis of public UAP and UFO government records, including source timelines, evidence classification, observed capabilities, agencies, locations, and source summaries.">
+  <meta property="og:url" content="https://ufo-analysis.rittmuller.com/">
+  <meta property="og:image" content="https://ufo-analysis.rittmuller.com/assets/hero-classified-saucer.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="UAP/UFO Research Dashboard | Public Government Records Analysis">
+  <meta name="twitter:description" content="Explore an AI-assisted analysis of public UAP and UFO government records, including source timelines, evidence classification, observed capabilities, agencies, locations, and source summaries.">
+  <meta name="twitter:image" content="https://ufo-analysis.rittmuller.com/assets/hero-classified-saucer.png">
+  <meta name="theme-color" content="#07080b">
   <style>
     :root {
       --void: #07080b;
@@ -1272,7 +1286,7 @@
     function formatExtractionMethod(value) {
       return String(value || '')
         .replaceAll('_', ' ')
-        .replace(/\w/g, (letter) => letter.toUpperCase());
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
     }
 
     function isVisualSource(doc) {

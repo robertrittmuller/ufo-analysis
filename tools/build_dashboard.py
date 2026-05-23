@@ -6,6 +6,7 @@ import argparse
 import base64
 import csv
 import hashlib
+from html import escape as html_escape
 import io
 import json
 import math
@@ -38,6 +39,14 @@ DEFAULT_DOCUMENT_CACHE_DIR = REPO_ROOT / "data" / "processed" / "documents"
 DEFAULT_TRANSCRIPT_CACHE_DIR = REPO_ROOT / "data" / "processed" / "transcripts"
 DEFAULT_SOURCE_MANIFEST = REPO_ROOT / "data" / "processed" / "source_manifest.json"
 DEFAULT_REVIEW_FILE = REPO_ROOT / "data" / "reviewed" / "document_reviews.json"
+DEFAULT_SITE_URL = "https://ufo-analysis.rittmuller.com"
+
+SEO_TITLE = "UAP/UFO Research Dashboard | Public Government Records Analysis"
+SEO_DESCRIPTION = (
+  "Explore an AI-assisted analysis of public UAP and UFO government records, including source timelines, "
+  "evidence classification, observed capabilities, agencies, locations, and source summaries."
+)
+SEO_IMAGE_PATH = "assets/hero-classified-saucer.png"
 
 
 DOCUMENT_CACHE_VERSION = 2
@@ -609,6 +618,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
     default=DEFAULT_OUTPUT_JSON,
         help="Structured JSON analysis output path.",
+    )
+    parser.add_argument(
+        "--site-url",
+        default=DEFAULT_SITE_URL,
+        help="Canonical public URL for SEO metadata, robots.txt, and sitemap.xml.",
     )
     parser.add_argument(
         "--document-cache-dir",
@@ -3224,7 +3238,46 @@ def build_analysis(
     return analysis
 
 
-def render_dashboard_html(analysis: dict[str, object]) -> str:
+def normalize_site_url(site_url: str) -> str:
+    site_url = site_url.strip().rstrip("/")
+    if not site_url:
+        return DEFAULT_SITE_URL
+    if not re.match(r"^https?://", site_url):
+        site_url = f"https://{site_url}"
+    return site_url.rstrip("/")
+
+
+def render_robots_txt(site_url: str) -> str:
+    canonical_site_url = normalize_site_url(site_url)
+    return f"""User-agent: *
+Allow: /
+
+Sitemap: {canonical_site_url}/sitemap.xml
+"""
+
+
+def render_sitemap_xml(site_url: str, generated_at: str | None = None) -> str:
+    canonical_url = f"{normalize_site_url(site_url)}/"
+    lastmod = generated_at[:10] if generated_at else datetime.utcnow().date().isoformat()
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>{html_escape(canonical_url, quote=True)}</loc>
+    <lastmod>{html_escape(lastmod, quote=True)}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>
+"""
+
+
+def write_crawl_files(output_dir: Path, site_url: str, generated_at: str | None = None) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "robots.txt").write_text(render_robots_txt(site_url), encoding="utf-8")
+    (output_dir / "sitemap.xml").write_text(render_sitemap_xml(site_url, generated_at), encoding="utf-8")
+
+
+def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_SITE_URL) -> str:
     data_json = json.dumps(analysis, ensure_ascii=False).replace("<", "\\u003c")
     land_asset = Path(__file__).resolve().parent / "assets" / "ne_110m_land.geojson"
     land_payload = json.loads(land_asset.read_text(encoding="utf-8"))
@@ -3236,12 +3289,29 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
         ]
     }
     world_land_json = json.dumps(world_land, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
+    canonical_site_url = normalize_site_url(site_url)
+    canonical_url = f"{canonical_site_url}/"
+    social_image_url = f"{canonical_site_url}/{SEO_IMAGE_PATH}"
     template = """<!DOCTYPE html>
 <html lang=\"en\">
 <head>
   <meta charset=\"utf-8\">
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-  <title>UAP/UFO Research</title>
+  <title>__PAGE_TITLE__</title>
+  <meta name=\"description\" content=\"__PAGE_DESCRIPTION__\">
+  <meta name=\"robots\" content=\"index, follow\">
+  <link rel=\"canonical\" href=\"__CANONICAL_URL__\">
+  <meta property=\"og:type\" content=\"website\">
+  <meta property=\"og:site_name\" content=\"UAP/UFO Research Dashboard\">
+  <meta property=\"og:title\" content=\"__PAGE_TITLE__\">
+  <meta property=\"og:description\" content=\"__PAGE_DESCRIPTION__\">
+  <meta property=\"og:url\" content=\"__CANONICAL_URL__\">
+  <meta property=\"og:image\" content=\"__SOCIAL_IMAGE_URL__\">
+  <meta name=\"twitter:card\" content=\"summary_large_image\">
+  <meta name=\"twitter:title\" content=\"__PAGE_TITLE__\">
+  <meta name=\"twitter:description\" content=\"__PAGE_DESCRIPTION__\">
+  <meta name=\"twitter:image\" content=\"__SOCIAL_IMAGE_URL__\">
+  <meta name=\"theme-color\" content=\"#07080b\">
   <style>
     :root {{
       --void: #07080b;
@@ -4510,7 +4580,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     function formatExtractionMethod(value) {
       return String(value || '')
         .replaceAll('_', ' ')
-        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+        .replace(/\\b\\w/g, (letter) => letter.toUpperCase());
     }
 
     function isVisualSource(doc) {
@@ -5250,7 +5320,15 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
 </html>
 """
     template = template.replace("{{", "{").replace("}}", "}")
-    return template.replace("__DATA_JSON__", data_json).replace("__WORLD_LAND_JSON__", world_land_json)
+    return (
+      template
+      .replace("__PAGE_TITLE__", html_escape(SEO_TITLE, quote=True))
+      .replace("__PAGE_DESCRIPTION__", html_escape(SEO_DESCRIPTION, quote=True))
+      .replace("__CANONICAL_URL__", html_escape(canonical_url, quote=True))
+      .replace("__SOCIAL_IMAGE_URL__", html_escape(social_image_url, quote=True))
+      .replace("__DATA_JSON__", data_json)
+      .replace("__WORLD_LAND_JSON__", world_land_json)
+    )
 
 
 def iter_source_paths(source_dir: Path) -> Iterable[Path]:
@@ -5523,7 +5601,8 @@ def main() -> int:
     if args.review_mode == "hybrid" and review_overrides:
         write_review_overrides(args.review_file, review_overrides)
     args.output_json.write_text(json.dumps(analysis, indent=2, ensure_ascii=False), encoding="utf-8")
-    args.output_html.write_text(render_dashboard_html(analysis), encoding="utf-8")
+    args.output_html.write_text(render_dashboard_html(analysis, args.site_url), encoding="utf-8")
+    write_crawl_files(args.output_html.parent, args.site_url, str(analysis.get("generated_at") or ""))
 
     media_documents = sum(1 for document in documents if document.get("media_type") in MEDIA_TYPES)
     print(f"Analyzed {len(documents)} source items")
