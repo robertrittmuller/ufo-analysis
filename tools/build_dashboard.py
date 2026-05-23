@@ -47,6 +47,7 @@ SEO_DESCRIPTION = (
   "evidence classification, observed capabilities, agencies, locations, and source summaries."
 )
 SEO_IMAGE_PATH = "assets/hero-classified-saucer.png"
+SEO_FAVICON_PATH = "favicon.svg"
 
 
 DOCUMENT_CACHE_VERSION = 2
@@ -3301,6 +3302,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
   <meta name=\"description\" content=\"__PAGE_DESCRIPTION__\">
   <meta name=\"robots\" content=\"index, follow\">
   <link rel=\"canonical\" href=\"__CANONICAL_URL__\">
+  <link rel=\"icon\" href=\"__FAVICON_URL__\" type=\"image/svg+xml\">
   <meta property=\"og:type\" content=\"website\">
   <meta property=\"og:site_name\" content=\"UAP/UFO Research Dashboard\">
   <meta property=\"og:title\" content=\"__PAGE_TITLE__\">
@@ -5325,6 +5327,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       .replace("__PAGE_TITLE__", html_escape(SEO_TITLE, quote=True))
       .replace("__PAGE_DESCRIPTION__", html_escape(SEO_DESCRIPTION, quote=True))
       .replace("__CANONICAL_URL__", html_escape(canonical_url, quote=True))
+      .replace("__FAVICON_URL__", html_escape(SEO_FAVICON_PATH, quote=True))
       .replace("__SOCIAL_IMAGE_URL__", html_escape(social_image_url, quote=True))
       .replace("__DATA_JSON__", data_json)
       .replace("__WORLD_LAND_JSON__", world_land_json)
