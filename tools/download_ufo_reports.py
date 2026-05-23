@@ -18,17 +18,17 @@ except ImportError:  # pragma: no cover - depends on local environment
 
 
 START_URL = "https://www.war.gov/ufo/"
-CSV_URL = "https://www.war.gov/Portals/1/Interactive/2026/UFO/uap-release001.csv"
+CSV_URL = "https://www.war.gov/Portals/1/Interactive/2026/UFO/uap-data.csv"
 DVIDS_ASSET_URL = "https://api.dvidshub.net/asset"
 DVIDS_VIDEO_PAGE_URL = "https://www.war.gov/Multimedia/Videos?videoid="
 DEFAULT_DVIDS_API_KEY = "key-68bb60d16b35e"
 SOURCE_MANIFEST_VERSION = 1
-SUPPORTED_MEDIA_TYPES = {"pdf", "image", "video"}
+SUPPORTED_MEDIA_TYPES = {"pdf", "image", "video", "audio"}
 
 
 def parse_media_types(value: str) -> set[str]:
     requested = {item.strip().lower() for item in value.split(",") if item.strip()}
-    aliases = {"img": "image", "vid": "video"}
+    aliases = {"img": "image", "vid": "video", "aud": "audio"}
     normalized = {aliases.get(item, item) for item in requested}
     invalid = normalized - SUPPORTED_MEDIA_TYPES
     if invalid:
@@ -61,8 +61,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--media-types",
         type=parse_media_types,
-        default=parse_media_types("pdf,image,video"),
-        help="Comma-separated media types to download. Defaults to pdf,image,video.",
+        default=parse_media_types("pdf,image,video,audio"),
+        help="Comma-separated media types to download. Defaults to pdf,image,video,audio.",
     )
     parser.add_argument(
         "--max-files",
@@ -203,6 +203,8 @@ def normalize_media_type(value: str) -> str:
         return "image"
     if clean.startswith("v"):
         return "video"
+    if clean.startswith("a"):
+        return "audio"
     return clean
 
 
@@ -222,7 +224,7 @@ def iter_media_records(csv_text: str, media_types: set[str]) -> list[dict[str, s
             continue
 
         source_url = (row.get("PDF | Image Link") or "").strip()
-        if media_type == "video":
+        if media_type in {"audio", "video"}:
             video_ids = split_pipe_list(row.get("DVIDS Video ID") or "")
             if not video_ids:
                 continue
@@ -341,7 +343,7 @@ def main() -> int:
             video_metadata: dict[str, object] | None = None
             selected_video_file: dict[str, object] | None = None
 
-            if media_type == "video":
+            if media_type in {"audio", "video"}:
                 video_id = (record.get("DVIDS Video ID") or "").strip()
                 video_metadata = fetch_dvids_video_metadata(dvids_session, video_id, dvids_api_key)
                 selected_video_file = choose_highest_mp4(video_metadata.get("files"))
@@ -379,7 +381,7 @@ def main() -> int:
                 "modal_image_url": normalize_space(record.get("Modal Image") or ""),
             }
 
-            if media_type == "video" and video_metadata is not None:
+            if media_type in {"audio", "video"} and video_metadata is not None:
                 video_id = normalize_space(record.get("DVIDS Video ID") or "")
                 video_description = normalize_space(str(video_metadata.get("description") or ""))
                 manifest_record.update(

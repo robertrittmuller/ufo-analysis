@@ -16,7 +16,7 @@ import sys
 import tempfile
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -35,6 +35,7 @@ DEFAULT_SOURCE_DIR = REPO_ROOT / "data" / "sources"
 DEFAULT_OUTPUT_HTML = REPO_ROOT / "dashboard" / "index.html"
 DEFAULT_OUTPUT_JSON = REPO_ROOT / "data" / "processed" / "ufo_dashboard_analysis.json"
 DEFAULT_DOCUMENT_CACHE_DIR = REPO_ROOT / "data" / "processed" / "documents"
+DEFAULT_TRANSCRIPT_CACHE_DIR = REPO_ROOT / "data" / "processed" / "transcripts"
 DEFAULT_SOURCE_MANIFEST = REPO_ROOT / "data" / "processed" / "source_manifest.json"
 DEFAULT_REVIEW_FILE = REPO_ROOT / "data" / "reviewed" / "document_reviews.json"
 
@@ -42,12 +43,31 @@ DEFAULT_REVIEW_FILE = REPO_ROOT / "data" / "reviewed" / "document_reviews.json"
 DOCUMENT_CACHE_VERSION = 2
 SOURCE_MANIFEST_VERSION = 1
 EXECUTIVE_SUMMARY_REVIEW_KEY = "__corpus_executive_summary__"
-EXECUTIVE_SUMMARY_VERSION = 1
+EXECUTIVE_SUMMARY_VERSION = 2
 
 PDF_EXTENSIONS = {".pdf"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
-SUPPORTED_SOURCE_EXTENSIONS = PDF_EXTENSIONS | IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+AUDIO_EXTENSIONS = {".aac", ".flac", ".m4a", ".mp3", ".oga", ".ogg", ".opus", ".wav"}
+SUPPORTED_SOURCE_EXTENSIONS = PDF_EXTENSIONS | IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
+MEDIA_TYPES = {"image", "video", "audio"}
+AUDIO_TRANSCRIPT_FAILURE_PATTERNS = (
+  "cannot directly process audio",
+  "cannot process audio",
+  "can't process audio",
+  "unable to process audio",
+  "i cannot listen",
+  "no actual audio",
+  "no audio file",
+  "no audio data",
+  "no audio was provided",
+  "haven't provided any audio",
+  "language none",
+  "<asr_text>",
+  "без генерации",
+  "текущий уровень",
+)
+MIN_ASR_TRANSCRIPT_ALNUM_CHARS = 8
 
 
 EVIDENCE_CATEGORY_DEFINITIONS = (
@@ -334,7 +354,8 @@ DOCUMENT_TYPE_PATTERNS = [
     ("Mission Report", ["mission report"]),
     ("Incident Summary", ["incident summary", "incident summaries"]),
     ("Transcript", ["transcript", "crew debriefing"]),
-    ("Video / Audio", ["video", "audio excerpt", "audio recording"]),
+    ("Video", ["video"]),
+    ("Audio", ["audio excerpt", "audio recording"]),
     ("Debrief / Reporting Form", ["debrief", "reporting form"]),
     ("Diplomatic Cable", ["cable"]),
     ("Email Correspondence", ["email correspondence", "email correspondance", "email"]),
@@ -401,6 +422,44 @@ def parse_args() -> argparse.Namespace:
         help="Directory for per-document JSON cache files used to resume interrupted runs.",
     )
     parser.add_argument(
+        "--transcript-cache-dir",
+        type=Path,
+        default=DEFAULT_TRANSCRIPT_CACHE_DIR,
+        help="Directory for caption/transcript text extracted from media assets.",
+    )
+    parser.add_argument(
+        "--audio-transcript-mode",
+        choices=("off", "captions", "llm"),
+        default="llm",
+        help=(
+          "How to extract media transcripts: off disables transcripts, captions uses only source captions, "
+          "and llm also extracts audio tracks for the local model when captions are unavailable."
+        ),
+    )
+    parser.add_argument(
+        "--audio-transcript-model",
+        default="Qwen3-ASR-0.6B-4bit",
+        help="Local speech-to-text model name for audio transcription.",
+    )
+    parser.add_argument(
+        "--audio-transcript-max-seconds",
+        type=int,
+        default=120,
+        help="Maximum seconds of an audio track to send to the model for transcript extraction.",
+    )
+    parser.add_argument(
+        "--audio-transcript-timeout",
+        type=int,
+        default=75,
+        help="Timeout in seconds for each local model audio transcription request.",
+    )
+    parser.add_argument(
+        "--audio-transcript-format",
+        choices=("wav", "mp3"),
+        default="wav",
+        help="Audio format sent to the local model for transcript extraction.",
+    )
+    parser.add_argument(
       "--source-manifest",
       type=Path,
     default=DEFAULT_SOURCE_MANIFEST,
@@ -420,8 +479,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
       "--review-mode",
       choices=("manual", "hybrid"),
-      default="manual",
-      help="Review strategy: manual uses only saved review-file overrides, hybrid also generates or refreshes reviews with the local model when requested.",
+      default="hybrid",
+      help="Review strategy: manual uses only saved review-file overrides, hybrid also generates missing reviews with the local model.",
     )
     parser.add_argument(
       "--refresh-reviews",
@@ -652,7 +711,7 @@ def first_manifest_text(source_metadata: dict[str, object] | None, *keys: str) -
 
 
 def source_thumbnail_url(source_metadata: dict[str, object] | None, media_type: str) -> str | None:
-  if media_type == "video":
+  if media_type in {"audio", "video"}:
     return first_manifest_text(source_metadata, "thumbnail_url", "modal_image_url")
   if media_type == "image":
     return first_manifest_text(source_metadata, "modal_image_url", "page_media_url", "original_source_url")
@@ -742,13 +801,26 @@ def apply_review_override(document: dict[str, object], review: dict[str, object]
   document.setdefault("review_status", "generated")
   document.setdefault("review_source", "scripted_extraction")
   if not review:
-    return annotate_evidence_classification(document)
+    return annotate_evidence_classification(normalize_document_after_review(document))
 
   merged = dict(document)
   merged.update(review)
   merged.setdefault("review_status", "reviewed")
   merged.setdefault("review_source", "manual_ai_review")
-  return annotate_evidence_classification(merged)
+  return annotate_evidence_classification(normalize_document_after_review(merged))
+
+
+def normalize_document_after_review(document: dict[str, object]) -> dict[str, object]:
+  media_type = str(document.get("media_type") or "").lower()
+  if media_type == "audio":
+    document["document_type"] = "Audio"
+    if document.get("extraction_method") != "audio_transcript":
+      document["extraction_method"] = "audio_metadata"
+  elif media_type == "video":
+    document["document_type"] = "Video"
+    if document.get("extraction_method") != "video_audio_transcript":
+      document["extraction_method"] = "video_metadata"
+  return document
 
 
 def normalize_evidence_category(value: object) -> dict[str, object] | None:
@@ -869,6 +941,11 @@ class LocalModelReviewer:
   timeout_seconds: int
   max_images: int
   api_key: str | None = None
+  audio_transcript_model: str | None = None
+  audio_transcript_max_seconds: int = 120
+  audio_transcript_timeout: int = 75
+  audio_transcript_format: str = "wav"
+  audio_transcription_disabled: bool = field(default=False, init=False)
 
   def _image_file_data_url(self, path: Path, max_dimension: int = 1280) -> str | None:
     try:
@@ -881,6 +958,50 @@ class LocalModelReviewer:
       return None
     encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
     return f"data:image/jpeg;base64,{encoded}"
+
+  def _audio_file_data(self, path: Path, metadata: dict[str, object]) -> tuple[bytes, dict[str, object]] | None:
+    audio_format = self.audio_transcript_format if self.audio_transcript_format in {"wav", "mp3"} else "wav"
+    max_seconds = max(1, int(self.audio_transcript_max_seconds or 180))
+    duration = metadata.get("duration_seconds")
+    if isinstance(duration, str):
+      try:
+        duration = float(duration)
+      except ValueError:
+        duration = None
+
+    with tempfile.TemporaryDirectory(prefix="ufo-audio-track-") as audio_dir:
+      audio_path = Path(audio_dir) / f"audio.{audio_format}"
+      command = ["ffmpeg", "-y"]
+      if isinstance(duration, (int, float)) and duration > max_seconds:
+        command.extend(["-t", str(max_seconds)])
+      command.extend(["-i", str(path), "-vn", "-ac", "1", "-ar", "16000"])
+      if audio_format == "mp3":
+        command.extend(["-b:a", "64k"])
+      command.append(str(audio_path))
+
+      try:
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=max(60, max_seconds + 30),
+        )
+      except (FileNotFoundError, subprocess.SubprocessError, TimeoutError):
+        return None
+
+      try:
+        audio_bytes = audio_path.read_bytes()
+      except OSError:
+        return None
+
+    extraction_metadata: dict[str, object] = {
+      "audio_transcript_format": audio_format,
+      "audio_transcript_seconds": min(float(duration), max_seconds) if isinstance(duration, (int, float)) else max_seconds,
+    }
+    if isinstance(duration, (int, float)) and duration > max_seconds:
+      extraction_metadata["audio_transcript_truncated"] = True
+    return audio_bytes, extraction_metadata
 
   def _render_review_image(self, page: fitz.Page) -> str:
     pixmap = page.get_pixmap(matrix=fitz.Matrix(1.2, 1.2), alpha=False)
@@ -1031,7 +1152,12 @@ class LocalModelReviewer:
     )
     return f"{sampling_note}\n\n" + "\n\n".join(sampled_sections)
 
-  def _chat(self, messages: list[dict[str, object]], max_tokens: int = 6000) -> dict[str, object]:
+  def _chat(
+      self,
+      messages: list[dict[str, object]],
+      max_tokens: int = 6000,
+      timeout_seconds: int | None = None,
+  ) -> dict[str, object]:
     payload = {
       "model": self.model_name,
       "messages": messages,
@@ -1050,8 +1176,169 @@ class LocalModelReviewer:
       headers=headers,
       method="POST",
     )
-    with urllib_request.urlopen(request, timeout=self.timeout_seconds) as response:
+    with urllib_request.urlopen(request, timeout=timeout_seconds or self.timeout_seconds) as response:
       return json.loads(response.read().decode("utf-8"))
+
+  def _audio_transcription_request(
+      self,
+      audio_bytes: bytes,
+      audio_format: str,
+      model_name: str,
+  ) -> dict[str, object] | None:
+    base_url = self.base_url.rstrip("/")
+    if not base_url.endswith("/v1"):
+      base_url = f"{base_url}/v1"
+    boundary = f"----ufo-audio-{hashlib.sha1(audio_bytes[:1024] + model_name.encode('utf-8')).hexdigest()}"
+    filename = f"audio.{audio_format}"
+    content_type = "audio/mpeg" if audio_format == "mp3" else "audio/wav"
+
+    body = b"".join(
+      [
+        f"--{boundary}\r\n".encode("utf-8"),
+        b'Content-Disposition: form-data; name="model"\r\n\r\n',
+        model_name.encode("utf-8"),
+        b"\r\n",
+        f"--{boundary}\r\n".encode("utf-8"),
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode("utf-8"),
+        f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"),
+        audio_bytes,
+        b"\r\n",
+        f"--{boundary}--\r\n".encode("utf-8"),
+      ]
+    )
+    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    if self.api_key:
+      headers["Authorization"] = f"Bearer {self.api_key}"
+    request = urllib_request.Request(
+      url=f"{base_url}/audio/transcriptions",
+      data=body,
+      headers=headers,
+      method="POST",
+    )
+    with urllib_request.urlopen(request, timeout=max(15, int(self.audio_transcript_timeout or 75))) as response:
+      return json.loads(response.read().decode("utf-8"))
+
+  def _parse_transcript_response(self, response: dict[str, object]) -> str | None:
+    choices = response.get("choices") or []
+    if not choices:
+      return None
+    message = choices[0].get("message") or {}
+    content_text = message.get("content")
+    reasoning_text = message.get("reasoning_content")
+    combined_response = normalize_space(" ".join(text for text in (content_text, reasoning_text) if isinstance(text, str))).lower()
+    if any(pattern in combined_response for pattern in AUDIO_TRANSCRIPT_FAILURE_PATTERNS):
+      self.audio_transcription_disabled = True
+      return None
+
+    transcript = ""
+    payload = extract_json_object(content_text) if isinstance(content_text, str) else None
+    if not payload and isinstance(reasoning_text, str):
+      payload = extract_json_object(reasoning_text)
+    if payload:
+      candidate = payload.get("transcript")
+      if isinstance(candidate, str):
+        transcript = candidate
+    elif isinstance(content_text, str):
+      transcript = content_text
+
+    transcript = clean_transcript_text(transcript)
+    if not transcript:
+      return None
+    if any(pattern in transcript.lower() for pattern in AUDIO_TRANSCRIPT_FAILURE_PATTERNS):
+      self.audio_transcription_disabled = True
+      return None
+    return transcript
+
+  def transcribe_audio_track(self, path: Path, metadata: dict[str, object]) -> tuple[str, dict[str, object]]:
+    if self.audio_transcription_disabled:
+      return "", {}
+
+    audio_data = self._audio_file_data(path, metadata)
+    if audio_data is None:
+      return "", {}
+    audio_bytes, extraction_metadata = audio_data
+    audio_format = str(extraction_metadata["audio_transcript_format"])
+    model_name = self.audio_transcript_model or self.model_name
+    try:
+      transcription_response = self._audio_transcription_request(audio_bytes, audio_format, model_name)
+    except (urllib_error.URLError, TimeoutError, json.JSONDecodeError):
+      transcription_response = None
+    if transcription_response:
+      transcript = clean_transcript_text(str(transcription_response.get("text") or ""))
+      if (
+          transcript
+          and is_meaningful_asr_transcript(transcript)
+          and not any(pattern in transcript.lower() for pattern in AUDIO_TRANSCRIPT_FAILURE_PATTERNS)
+      ):
+        metadata_out = dict(extraction_metadata)
+        metadata_out.update(
+          {
+            "transcript_source": "asr_audio",
+            "transcript_model": model_name,
+            "transcript_characters": len(transcript),
+          }
+        )
+        language = transcription_response.get("language")
+        if isinstance(language, str) and normalize_space(language):
+          metadata_out["transcript_language"] = normalize_space(language)
+        return transcript, metadata_out
+      return "", {
+        **extraction_metadata,
+        "transcript_source": "asr_audio",
+        "transcript_model": model_name,
+        "transcript_status": "no_useful_transcript",
+        "transcript_characters": 0,
+      }
+
+    encoded_audio = base64.b64encode(audio_bytes).decode("ascii")
+    prompt_text = (
+      "Transcribe the spoken audio in this UFO/UAP media asset. "
+      "Return only a JSON object with one key, transcript. "
+      "Include intelligible radio calls, narration, cockpit audio, labels spoken aloud, and meaningful non-speech cues in brackets. "
+      "If there is no intelligible speech or audio content, return {\"transcript\":\"\"}."
+    )
+    data_url = f"data:audio/{'mpeg' if audio_format == 'mp3' else 'wav'};base64,{encoded_audio}"
+    content_variants = (
+      [
+        {"type": "text", "text": prompt_text},
+        {"type": "input_audio", "input_audio": {"data": encoded_audio, "format": audio_format}},
+      ],
+      [
+        {"type": "text", "text": prompt_text},
+        {"type": "audio_url", "audio_url": {"url": data_url}},
+      ],
+    )
+
+    original_model = self.model_name
+    try:
+      self.model_name = model_name
+      for content in content_variants:
+        try:
+          response = self._chat(
+            [{"role": "user", "content": content}],
+            max_tokens=4000,
+            timeout_seconds=max(15, int(self.audio_transcript_timeout or 75)),
+          )
+        except (urllib_error.URLError, TimeoutError, json.JSONDecodeError):
+          self.audio_transcription_disabled = True
+          return "", {}
+        transcript = self._parse_transcript_response(response)
+        if transcript:
+          metadata_out = dict(extraction_metadata)
+          metadata_out.update(
+            {
+              "transcript_source": "llm_audio",
+              "transcript_model": model_name,
+              "transcript_characters": len(transcript),
+            }
+          )
+          return transcript, metadata_out
+        if self.audio_transcription_disabled:
+          return "", {}
+    finally:
+      self.model_name = original_model
+
+    return "", {}
 
   def _parse_review_response(self, response: dict[str, object], resolver: "PlaceResolver") -> dict[str, object] | None:
     choices = response.get("choices") or []
@@ -1184,8 +1471,10 @@ class LocalModelReviewer:
     media_type = str(document.get("media_type") or "media")
     prompt_text = (
       "You are reviewing a UFO/UAP archive media asset for a research dashboard. "
-      "Use the attached image or sampled video frames as primary evidence, and use the manifest text only as context. "
+      "Use the attached image or sampled video frames as primary evidence when present, and use transcript text as the primary evidence for audio-only assets when provided. "
+      "If an audio-only asset has no transcript, use manifest text only as source context. "
       "For videos, the attached frames are samples from the clip; describe visible objects, sensor overlays, scene context, apparent motion cues only when the frames support them, and any uncertainty. "
+      "When transcript text is provided, use it as evidence for audible narration, cockpit audio, captions, or spoken context, while still separating what is visible from what is spoken. "
       "Do not invent conclusions about identity, speed, altitude, intent, or authenticity. "
       "Return only a JSON object with these keys: summary_narrative, visual_observations, document_type, themes, agencies, location_label, evidence_category. "
       f"document_type must be one of {sorted(DOCUMENT_TYPE_LABELS)}. "
@@ -1203,7 +1492,7 @@ class LocalModelReviewer:
       f"Current agency hints: {document.get('agencies', [])}\n"
       f"Local media metadata: {json.dumps(media_metadata, ensure_ascii=False)}\n"
       f"Manifest narrative/context: {manifest_narrative or '[no manifest narrative available]'}\n"
-      f"OCR/text extracted from the media: {extracted_text or '[no text extracted from media]'}"
+      f"OCR/transcript text extracted from the media: {extracted_text or '[no text extracted from media]'}"
     )
 
     image_urls: list[str] = []
@@ -1214,7 +1503,7 @@ class LocalModelReviewer:
     elif media_type == "video":
       image_urls.extend(self._extract_video_frame_data_urls(path, media_metadata))
 
-    if not image_urls:
+    if not image_urls and media_type != "audio":
       return None
 
     content: list[dict[str, object]] = [{"type": "text", "text": prompt_text}]
@@ -1229,6 +1518,26 @@ class LocalModelReviewer:
 
   def review_corpus(self, documents: list[dict[str, object]]) -> dict[str, object] | None:
     summary_blocks: list[str] = []
+    standout_sources = select_standout_category_one_sources(documents, limit=3)
+    standout_blocks: list[str] = []
+    for index, document in enumerate(standout_sources, start=1):
+      themes = ", ".join(str(theme) for theme in document.get("themes", []) if isinstance(theme, str))
+      location = document.get("location")
+      location_label = location.get("label") if isinstance(location, dict) else None
+      evidence_terms = extract_standout_evidence_terms(document)
+      standout_blocks.append(
+        "\n".join(
+          [
+            f"{index}. {document.get('title')}",
+            f"Year: {document.get('year') or document.get('year_start') or 'unknown'}",
+            f"Type: {document.get('document_type')}",
+            f"Location: {location_label or 'unknown'}",
+            f"Themes: {themes or 'none'}",
+            f"Why it stands out: {', '.join(evidence_terms) if evidence_terms else 'Category One source with unusually detailed reporting.'}",
+            f"Summary: {normalize_space(str(document.get('summary_narrative') or ''))}",
+          ]
+        )
+      )
     for index, document in enumerate(documents, start=1):
       summary = normalize_space(str(document.get("summary_narrative") or ""))
       if not summary:
@@ -1258,10 +1567,15 @@ class LocalModelReviewer:
       "Use every document summary below as source material, and synthesize across the whole corpus rather than retelling one document at a time. "
       "Build a careful narrative around what the data might mean: historical development, institutional behavior, geography, evidence quality, recurring observation patterns, and outliers. "
       "Call out specific elements that stand out, including document titles or event clusters when useful. "
+      "You must explicitly include the three supplied Standout Category One sources as the strongest high-detail/high-evidence examples, naming each source title and why it matters. "
       "Do not overstate certainty; distinguish concrete patterns in the summaries from interpretation. "
       "Return only a JSON object with key executive_summary_sections. "
       "executive_summary_sections must be an array of 3 to 5 polished paragraphs, each 2 to 4 sentences. "
+      "Make one paragraph focus on the three Standout Category One sources. "
       "Avoid bullets and avoid generic caveats.\n\n"
+      "Standout Category One sources:\n"
+      + ("\n\n".join(standout_blocks) if standout_blocks else "[none selected]")
+      + "\n\n"
       "Document summaries:\n"
       + "\n\n".join(summary_blocks)
     )
@@ -1422,7 +1736,8 @@ def infer_who_statement(document_type: str, agencies: list[str], themes: list[st
         "Mission Report": "Who: operational aircrews, command staff, and reporting personnel appear to be the primary actors in this record.",
         "Incident Summary": "Who: witnesses, reporting officers, and follow-on investigators appear to be the main actors in this case file.",
         "Transcript": "Who: crew members and mission support personnel are the central voices in this transcript.",
-        "Video / Audio": "Who: aircrews, sensor operators, analysts, or mission personnel are the likely actors connected to this media item.",
+        "Video": "Who: aircrews, sensor operators, analysts, or mission personnel are the likely actors connected to this video item.",
+        "Audio": "Who: crew members, mission support personnel, or narrators are the central voices connected to this audio item.",
         "Debrief / Reporting Form": "Who: pilots, range personnel, and debriefing officers appear to be the main actors in this file.",
         "Diplomatic Cable": "Who: diplomatic staff and government reporting channels are the main actors in this record.",
         "Email Correspondence": "Who: program staff and correspondence authors are the clearest actors in this exchange.",
@@ -1451,7 +1766,7 @@ def infer_significance_statement(
         significance_clauses.append("it gives researchers a comparable case summary for cross-incident pattern matching")
     if document_type == "Transcript":
         significance_clauses.append("it preserves near-contemporaneous testimony rather than later retellings")
-    if document_type == "Video / Audio":
+    if document_type in {"Video", "Audio"}:
         significance_clauses.append("it preserves source media that can be compared against written reporting and witness descriptions")
     if document_type == "Diplomatic Cable":
         significance_clauses.append("it shows how unusual observations moved through official diplomatic channels")
@@ -1606,6 +1921,159 @@ def probe_video(path: Path) -> dict[str, object]:
         pass
 
   return metadata
+
+
+def transcript_cache_path(cache_dir: Path, path: Path) -> Path:
+  return cache_dir / f"{path.stem}.txt"
+
+
+def transcript_metadata_cache_path(cache_dir: Path, path: Path) -> Path:
+  return cache_dir / f"{path.stem}.json"
+
+
+def clean_transcript_text(transcript_text: str) -> str:
+  lines: list[str] = []
+  for raw_line in transcript_text.replace("\ufeff", "").splitlines():
+    line = normalize_space(raw_line)
+    if line:
+      lines.append(line)
+  return normalize_space(" ".join(lines))
+
+
+def is_meaningful_asr_transcript(transcript_text: str) -> bool:
+  if cleaned_char_count(transcript_text) < MIN_ASR_TRANSCRIPT_ALNUM_CHARS:
+    return False
+  lowered = normalize_space(transcript_text.lower())
+  if lowered in {"the.", "the", "uh", "um", "hmm"}:
+    return False
+  return True
+
+
+def read_cached_transcript(cache_dir: Path, path: Path) -> tuple[str, dict[str, object]]:
+  cache_path = transcript_cache_path(cache_dir, path)
+  if not cache_path.exists():
+    return "", {}
+
+  transcript_text = clean_transcript_text(cache_path.read_text(encoding="utf-8"))
+  if not transcript_text:
+    return "", {}
+
+  metadata: dict[str, object] = {
+    "transcript_source": "transcript_cache",
+    "transcript_characters": len(transcript_text),
+  }
+  metadata_path = transcript_metadata_cache_path(cache_dir, path)
+  if metadata_path.exists():
+    try:
+      cached_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+      cached_metadata = None
+    if isinstance(cached_metadata, dict):
+      metadata.update(cached_metadata)
+      metadata["transcript_source"] = f"{metadata.get('transcript_source', 'transcript')}_cache"
+  return transcript_text, metadata
+
+
+def read_transcript_metadata(cache_dir: Path, path: Path) -> dict[str, object]:
+  metadata_path = transcript_metadata_cache_path(cache_dir, path)
+  if not metadata_path.exists():
+    return {}
+  try:
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+  except (json.JSONDecodeError, OSError):
+    return {}
+  return metadata if isinstance(metadata, dict) else {}
+
+
+def should_skip_asr_transcript(cache_dir: Path, path: Path, model_name: str) -> bool:
+  metadata = read_transcript_metadata(cache_dir, path)
+  return (
+    metadata.get("transcript_status") == "no_useful_transcript"
+    and metadata.get("transcript_model") == model_name
+  )
+
+
+def write_transcript_metadata(cache_dir: Path, path: Path, metadata: dict[str, object]) -> None:
+  cache_dir.mkdir(parents=True, exist_ok=True)
+  transcript_metadata_cache_path(cache_dir, path).write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def write_cached_transcript(cache_dir: Path, path: Path, transcript_text: str, metadata: dict[str, object]) -> None:
+  transcript_text = clean_transcript_text(transcript_text)
+  if not transcript_text:
+    return
+  cache_dir.mkdir(parents=True, exist_ok=True)
+  transcript_cache_path(cache_dir, path).write_text(transcript_text, encoding="utf-8")
+  metadata_payload = dict(metadata)
+  metadata_payload["transcript_characters"] = len(transcript_text)
+  write_transcript_metadata(cache_dir, path, metadata_payload)
+
+
+def closed_caption_url(source_metadata: dict[str, object]) -> str | None:
+  urls = source_metadata.get("closed_caption_urls")
+  if isinstance(urls, dict):
+    for key in ("srt", "webvtt"):
+      value = urls.get(key)
+      if isinstance(value, str) and normalize_space(value):
+        return value
+  return None
+
+
+def clean_caption_text(caption_text: str) -> str:
+  lines: list[str] = []
+  for raw_line in caption_text.replace("\ufeff", "").splitlines():
+    line = normalize_space(raw_line)
+    if not line:
+      continue
+    if line.upper() == "WEBVTT" or line.upper().startswith("NOTE"):
+      continue
+    if line.isdigit():
+      continue
+    if "-->" in line:
+      continue
+    line = re.sub(r"<[^>]+>", " ", line)
+    line = normalize_space(line)
+    if line:
+      lines.append(line)
+
+  deduped: list[str] = []
+  for line in lines:
+    if deduped and deduped[-1] == line:
+      continue
+    deduped.append(line)
+  return normalize_space(" ".join(deduped))
+
+
+def fetch_media_transcript(
+    path: Path,
+    source_metadata: dict[str, object],
+    transcript_cache_dir: Path,
+) -> tuple[str, dict[str, object]]:
+  cached_transcript, cached_metadata = read_cached_transcript(transcript_cache_dir, path)
+  if cached_transcript:
+    return cached_transcript, cached_metadata
+
+  caption_url = closed_caption_url(source_metadata)
+  if not caption_url:
+    return "", {}
+
+  try:
+    with urllib_request.urlopen(caption_url, timeout=120) as response:
+      caption_text = response.read().decode("utf-8-sig", errors="replace")
+  except (urllib_error.URLError, TimeoutError, UnicodeDecodeError):
+    return "", {}
+
+  transcript_text = clean_caption_text(caption_text)
+  if not transcript_text:
+    return "", {}
+
+  metadata = {
+    "transcript_source": "closed_caption",
+    "transcript_url": caption_url,
+    "transcript_characters": len(transcript_text),
+  }
+  write_cached_transcript(transcript_cache_dir, path, transcript_text, metadata)
+  return transcript_text, metadata
 
 
 class PlaceResolver:
@@ -1801,6 +2269,8 @@ def analyze_media_item(
     path: Path,
     resolver: PlaceResolver,
     source_dir: Path,
+    transcript_cache_dir: Path,
+    audio_transcript_mode: str,
     source_manifest: dict[str, dict[str, object]],
     review_overrides: dict[str, dict[str, object]],
     reviewer: LocalModelReviewer | None,
@@ -1808,7 +2278,7 @@ def analyze_media_item(
 ) -> dict[str, object]:
     source_metadata = source_manifest.get(path.name) or {}
     manifest_media_type = normalize_space(str(source_metadata.get("media_type") or "")).lower()
-    if manifest_media_type in {"image", "video"}:
+    if manifest_media_type in MEDIA_TYPES:
       media_type = manifest_media_type
     elif path.suffix.lower() in IMAGE_EXTENSIONS:
       media_type = "image"
@@ -1833,6 +2303,8 @@ def analyze_media_item(
     media_metadata: dict[str, object] = {}
     extracted_text = ""
     visual_observations = None
+    transcript_text = ""
+    transcript_metadata: dict[str, object] = {}
 
     if media_type == "image":
       try:
@@ -1850,16 +2322,42 @@ def analyze_media_item(
         )
     else:
       media_metadata = probe_video(path)
+      if media_type == "audio" and not media_metadata.get("audio_codec"):
+        media_metadata["audio_codec"] = path.suffix.lower().lstrip(".") or "audio"
+      if audio_transcript_mode != "off":
+        transcript_text, transcript_metadata = fetch_media_transcript(path, source_metadata, transcript_cache_dir)
+      if (
+          not transcript_text
+          and audio_transcript_mode == "llm"
+          and reviewer is not None
+          and (media_type == "audio" or media_metadata.get("audio_codec"))
+          and not should_skip_asr_transcript(
+            transcript_cache_dir,
+            path,
+            reviewer.audio_transcript_model or reviewer.model_name,
+          )
+      ):
+        transcript_text, transcript_metadata = reviewer.transcribe_audio_track(path, media_metadata)
+        if transcript_text:
+          write_cached_transcript(transcript_cache_dir, path, transcript_text, transcript_metadata)
+        elif transcript_metadata.get("transcript_status") == "no_useful_transcript":
+          write_transcript_metadata(transcript_cache_dir, path, transcript_metadata)
+      if transcript_metadata:
+        media_metadata.update(transcript_metadata)
+        extracted_text = transcript_text
       if "duration_seconds" not in media_metadata and source_metadata.get("duration_seconds") is not None:
         media_metadata["duration_seconds"] = source_metadata.get("duration_seconds")
-      document_type = "Video / Audio"
-      extraction_method = "video_metadata"
+      document_type = "Audio" if media_type == "audio" else "Video"
+      extraction_method = "audio_metadata" if media_type == "audio" else "video_metadata"
+      if transcript_text:
+        extraction_method = "audio_transcript" if media_type == "audio" else "video_audio_transcript"
       duration = media_metadata.get("duration_seconds")
       dimensions = ""
       if media_metadata.get("video_width") and media_metadata.get("video_height"):
         dimensions = f" at {media_metadata['video_width']} x {media_metadata['video_height']} pixels"
       if isinstance(duration, (int, float)):
-        visual_observations = f"Short video/audio clip, {format_duration(float(duration))} long{dimensions}."
+        clip_label = "Audio clip" if media_type == "audio" else "Video clip"
+        visual_observations = f"{clip_label}, {format_duration(float(duration))} long{dimensions}."
       elif dimensions:
         visual_observations = f"Short video clip{dimensions}."
 
@@ -1938,6 +2436,9 @@ def analyze_media_item(
         "text_characters": cleaned_char_count(combined_text),
         "summary_narrative": summary_narrative,
         "visual_observations": visual_observations,
+        "transcript_excerpt": choose_excerpt(transcript_text, max_length=900) if transcript_text else None,
+        "transcript_source": transcript_metadata.get("transcript_source"),
+        "transcript_characters": transcript_metadata.get("transcript_characters", 0),
         "themes": themes,
         "agencies": agencies,
         "top_terms": top_terms,
@@ -1953,7 +2454,8 @@ def analyze_media_item(
         else None,
     }
     review = find_review_override(review_overrides, path.name)
-    if reviewer is not None and (review is None or force_review_refresh or not review_has_evidence_category(review)):
+    needs_transcript_review = bool(transcript_text) and not (isinstance(review, dict) and review.get("transcript_reviewed"))
+    if reviewer is not None and (review is None or force_review_refresh or not review_has_evidence_category(review) or needs_transcript_review):
       generated_review = reviewer.review_media_item(
           document=document,
           path=path,
@@ -1965,6 +2467,8 @@ def analyze_media_item(
       if generated_review:
         updated_review = dict(review) if isinstance(review, dict) else {}
         updated_review.update(generated_review)
+        if transcript_text:
+          updated_review["transcript_reviewed"] = True
         review_overrides[path.name] = updated_review
         review = updated_review
     return apply_review_override(document, review)
@@ -2017,6 +2521,98 @@ def build_executive_summary_signature(documents: list[dict[str, object]]) -> str
       )
     payload = json.dumps(signature_documents, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def extract_standout_evidence_terms(document: dict[str, object]) -> list[str]:
+    text = normalize_space(
+      " ".join(
+        str(document.get(key) or "")
+        for key in ("title", "summary_narrative", "visual_observations")
+      )
+    ).lower()
+    checks = [
+      ("radar or sensor correlation", ("radar", "sensor", "tracked", "tracking", "tflir", "flir")),
+      ("multiple trained observers", ("multiple", "pilots", "pilot", "crew", "teams", "law enforcement")),
+      ("photographic or video evidence", ("photograph", "photo", "image", "imagery", "video", "film")),
+      ("physical trace evidence", ("physical evidence", "ground evidence", "indentations", "burned grass", "residue")),
+      ("specific maneuver detail", ("corkscrew", "90-degree", "formation", "rapid acceleration", "hovering", "land", "take off")),
+      ("night vision or visual detail", ("night vision", "orange", "orb", "bright light", "flame")),
+    ]
+    terms: list[str] = []
+    for label, needles in checks:
+      if any(needle in text for needle in needles):
+        terms.append(label)
+    return terms[:4]
+
+
+def category_one_standout_score(document: dict[str, object]) -> float:
+    text = normalize_space(
+      " ".join(
+        str(document.get(key) or "")
+        for key in ("title", "summary_narrative", "visual_observations")
+      )
+    ).lower()
+    weighted_terms = {
+      "physical evidence": 10,
+      "ground evidence": 10,
+      "indentations": 8,
+      "burned grass": 8,
+      "radar-confirmed": 9,
+      "radar": 7,
+      "sensor": 6,
+      "tracked": 6,
+      "tracking": 6,
+      "night vision": 6,
+      "photograph": 6,
+      "photo": 5,
+      "tflir": 5,
+      "flir": 5,
+      "multiple": 4,
+      "pilot": 4,
+      "pilots": 4,
+      "crew": 3,
+      "law enforcement": 4,
+      "formation": 3,
+      "rapid acceleration": 4,
+      "corkscrew": 4,
+      "90-degree": 4,
+    }
+    score = 0.0
+    for term, weight in weighted_terms.items():
+      if term in text:
+        score += weight
+    themes = set(str(theme) for theme in document.get("themes", []) if isinstance(theme, str))
+    if "Sensors and Radar" in themes:
+      score += 5
+    if "Imagery and Visuals" in themes:
+      score += 3
+    if "Anomalous Objects" in themes:
+      score += 2
+    if document.get("visual_observations"):
+      score += 4
+    if document.get("location"):
+      score += 2
+    if document.get("document_type") in {"Incident Summary", "Mission Report", "Statement", "UAP Report", "Diplomatic Cable"}:
+      score += 3
+    if re.search(r"\bsection\b", str(document.get("title") or ""), re.IGNORECASE):
+      score -= 4
+    return score
+
+
+def select_standout_category_one_sources(documents: list[dict[str, object]], limit: int = 3) -> list[dict[str, object]]:
+    candidates = [
+      document
+      for document in documents
+      if document.get("evidence_category") == "Category One"
+    ]
+    return sorted(
+      candidates,
+      key=lambda document: (
+        category_one_standout_score(document),
+        str(document.get("title") or ""),
+      ),
+      reverse=True,
+    )[:limit]
 
 
 def normalize_executive_summary_review(
@@ -3328,6 +3924,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
 
     function sourcePreviewLabel(doc) {
       if (doc.media_type === 'video') return 'Video thumbnail';
+      if (doc.media_type === 'audio') return 'Audio thumbnail';
       if (doc.media_type === 'image') return 'Image thumbnail';
       return 'Source thumbnail';
     }
@@ -3378,13 +3975,13 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
     function renderMetrics(items) {
       const years = items.map((doc) => doc.year).filter(Boolean);
       const ocrDocs = items.filter((doc) => doc.extraction_method === 'ocr' || doc.extraction_method === 'hybrid').length;
-      const mediaItems = items.filter((doc) => doc.media_type === 'image' || doc.media_type === 'video').length;
+      const mediaItems = items.filter((doc) => doc.media_type === 'image' || doc.media_type === 'video' || doc.media_type === 'audio').length;
       const located = items.filter((doc) => doc.location).length;
       const pages = items.reduce((sum, doc) => sum + (doc.page_count || 0), 0);
       const cards = [
         { value: items.length, label: 'Sources in view' },
         { value: pages, label: 'PDF pages represented' },
-        { value: mediaItems, label: 'Image/video items' },
+        { value: mediaItems, label: 'Media items' },
         { value: located, label: 'Resolved geolocations' },
         { value: ocrDocs, label: 'OCR-assisted files' },
         { value: years.length ? Math.min(...years) : '—', label: 'Earliest anchor year' },
@@ -3748,10 +4345,11 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
               const meta = doc.media_metadata || {};
               return meta.image_width && meta.image_height ? `${meta.image_width} x ${meta.image_height} image` : 'Image file';
             })()
-          : doc.media_type === 'video'
+          : doc.media_type === 'video' || doc.media_type === 'audio'
             ? (() => {
                 const meta = doc.media_metadata || {};
-                const duration = typeof meta.duration_seconds === 'number' ? `${Math.round(meta.duration_seconds)} sec` : 'Video file';
+                const fallbackLabel = doc.media_type === 'audio' ? 'Audio file' : 'Video file';
+                const duration = typeof meta.duration_seconds === 'number' ? `${Math.round(meta.duration_seconds)} sec` : fallbackLabel;
                 const dimensions = meta.video_width && meta.video_height ? `${meta.video_width} x ${meta.video_height}` : '';
                 return dimensions ? `${duration} · ${dimensions}` : duration;
               })()
@@ -4088,6 +4686,10 @@ def main() -> int:
             timeout_seconds=args.review_timeout,
             max_images=args.review_max_images,
             api_key=args.review_api_key,
+            audio_transcript_model=args.audio_transcript_model,
+            audio_transcript_max_seconds=args.audio_transcript_max_seconds,
+            audio_transcript_timeout=args.audio_transcript_timeout,
+            audio_transcript_format=args.audio_transcript_format,
         )
     source_manifest = load_source_manifest(args.source_manifest)
     source_paths = list(iter_source_paths(source_dir))
@@ -4135,6 +4737,7 @@ def main() -> int:
                 "thumbnail_url",
                 source_thumbnail_url(source_manifest.get(path.name), str(cached_document.get("media_type") or "pdf")),
             )
+            normalize_document_after_review(cached_document)
             documents.append(cached_document)
             cached_documents += 1
             progress.advance(path, cached=True)
@@ -4160,6 +4763,8 @@ def main() -> int:
                 path=path,
                 resolver=resolver,
                 source_dir=source_dir,
+                transcript_cache_dir=args.transcript_cache_dir,
+                audio_transcript_mode=args.audio_transcript_mode,
                 source_manifest=source_manifest,
                 review_overrides=review_overrides,
                 reviewer=reviewer,
@@ -4214,11 +4819,11 @@ def main() -> int:
     args.output_json.write_text(json.dumps(analysis, indent=2, ensure_ascii=False), encoding="utf-8")
     args.output_html.write_text(render_dashboard_html(analysis), encoding="utf-8")
 
-    media_documents = sum(1 for document in documents if document.get("media_type") in {"image", "video"})
+    media_documents = sum(1 for document in documents if document.get("media_type") in MEDIA_TYPES)
     print(f"Analyzed {len(documents)} source items")
     print(f"Loaded {cached_documents} document analyses from cache")
     print(f"Processed {analyzed_documents} document analyses this run")
-    print(f"Included {media_documents} image/video source items")
+    print(f"Included {media_documents} media source items")
     print(f"Skipped {skipped_duplicate_paths} duplicate source files based on original source URL")
     print(f"Updated review cache {review_file_updates} times")
     print(f"Wrote JSON to {args.output_json}")
