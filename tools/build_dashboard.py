@@ -488,6 +488,11 @@ def parse_args() -> argparse.Namespace:
       help="With --review-mode hybrid, rerun the local model review even for documents that already have saved reviews.",
     )
     parser.add_argument(
+      "--refresh-audio-context-only",
+      action="store_true",
+      help="With --review-mode hybrid, only generate missing audio source and transcript-summary review fields, then exit.",
+    )
+    parser.add_argument(
       "--review-base-url",
       default="http://localhost:4321/v1",
       help="Base URL for the local OpenAI-compatible review model endpoint.",
@@ -1157,6 +1162,7 @@ class LocalModelReviewer:
       messages: list[dict[str, object]],
       max_tokens: int = 6000,
       timeout_seconds: int | None = None,
+      response_format: dict[str, object] | None = None,
   ) -> dict[str, object]:
     payload = {
       "model": self.model_name,
@@ -1164,6 +1170,8 @@ class LocalModelReviewer:
       "temperature": 0,
       "max_tokens": max_tokens,
     }
+    if response_format is not None:
+      payload["response_format"] = response_format
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if self.api_key:
       headers["Authorization"] = f"Bearer {self.api_key}"
@@ -1385,6 +1393,14 @@ class LocalModelReviewer:
     if model_evidence_category is not None:
       review["evidence_category"] = model_evidence_category["label"]
 
+    audio_source = payload.get("audio_source_characterization")
+    if isinstance(audio_source, str) and normalize_space(audio_source):
+      review["audio_source_characterization"] = normalize_space(audio_source)
+
+    audio_summary = payload.get("audio_transcript_summary")
+    if isinstance(audio_summary, str) and normalize_space(audio_summary):
+      review["audio_transcript_summary"] = normalize_space(audio_summary)
+
     location_label = payload.get("location_label")
     if isinstance(location_label, str) and normalize_space(location_label):
       resolved = resolver.resolve(location_label)
@@ -1476,12 +1492,14 @@ class LocalModelReviewer:
       "For videos, the attached frames are samples from the clip; describe visible objects, sensor overlays, scene context, apparent motion cues only when the frames support them, and any uncertainty. "
       "When transcript text is provided, use it as evidence for audible narration, cockpit audio, captions, or spoken context, while still separating what is visible from what is spoken. "
       "Do not invent conclusions about identity, speed, altitude, intent, or authenticity. "
-      "Return only a JSON object with these keys: summary_narrative, visual_observations, document_type, themes, agencies, location_label, evidence_category. "
+      "Return only a JSON object with these keys: summary_narrative, visual_observations, document_type, themes, agencies, location_label, evidence_category, audio_source_characterization, audio_transcript_summary. "
       f"document_type must be one of {sorted(DOCUMENT_TYPE_LABELS)}. "
       f"themes must be chosen only from {sorted(THEME_KEYWORDS)}. "
       f"evidence_category must be one of {[definition['label'] for definition in EVIDENCE_CATEGORY_DEFINITIONS]}. "
       "summary_narrative must be 4 sentences covering who or source context, what is visible or audible in the asset, where, and significance. "
       "visual_observations must be a concrete visual narrative of what is actually visible in the attached media, not a restatement of the manifest. "
+      "audio_source_characterization must be a short LLM-generated phrase describing the actual kind of audio source, such as mission radio transmission, cockpit intercom, recorded interview, press briefing narration, or archival mission audio; use null when no transcript text is provided. "
+      "audio_transcript_summary must be a concise LLM-generated summary of what the transcript says, not a verbatim quote; use null when no transcript text is provided. "
       "If the image or frames do not show a meaningful anomalous object, say so clearly.\n\n"
       f"Filename: {document['filename']}\n"
       f"Title: {document['title']}\n"
@@ -1515,6 +1533,74 @@ class LocalModelReviewer:
     except (urllib_error.URLError, TimeoutError, json.JSONDecodeError):
       return None
     return self._parse_review_response(response, resolver)
+
+  def review_audio_transcript_context(
+      self,
+      document: dict[str, object],
+      manifest_narrative: str,
+      transcript_text: str,
+  ) -> dict[str, object] | None:
+    transcript_sample = choose_excerpt(transcript_text, max_length=2500)
+    manifest_sample = choose_excerpt(manifest_narrative, max_length=1000)
+    prompt_text = (
+      "You are preparing an audio context note for a UFO/UAP research dashboard. "
+      "Use the title, manifest context, and transcript text to infer the actual kind of audio source and summarize what the audio transcript says. "
+      "Do not quote the transcript verbatim. Do not mention cache files, extraction methods, model names, or implementation details. "
+      "Return only a JSON object with exactly these keys: audio_source_characterization, audio_transcript_summary. "
+      "audio_source_characterization must be a short noun phrase, for example mission radio transmission, cockpit intercom audio, recorded interview, crew debriefing audio, or archival mission audio. "
+      "audio_transcript_summary must be 1 to 2 concise sentences summarizing the transcript's substance and relevance.\n\n"
+      f"Filename: {document['filename']}\n"
+      f"Title: {document['title']}\n"
+      f"Media type: {document.get('media_type')}\n"
+      f"Document type: {document.get('document_type')}\n"
+      f"Manifest context: {manifest_sample or '[no manifest context available]'}\n"
+      f"Transcript text: {transcript_sample or '[no transcript text available]'}"
+    )
+    try:
+      response = self._chat(
+        [
+          {
+            "role": "system",
+            "content": "You are a JSON API. Return only the requested JSON object. Do not include reasoning, markdown, or explanatory text.",
+          },
+          {"role": "user", "content": prompt_text},
+        ],
+        max_tokens=2400,
+        timeout_seconds=min(self.timeout_seconds, 180),
+        response_format={"type": "json_object"},
+      )
+    except (urllib_error.URLError, TimeoutError, json.JSONDecodeError):
+      return None
+
+    choices = response.get("choices") or []
+    if not choices:
+      return None
+    message = choices[0].get("message") or {}
+    content_text = message.get("content")
+    if not isinstance(content_text, str):
+      return None
+    content_text = content_text.strip()
+    if not content_text.startswith("{"):
+      return None
+    try:
+      payload = json.loads(content_text)
+    except json.JSONDecodeError:
+      return None
+    if not isinstance(payload, dict):
+      return None
+
+    audio_source = payload.get("audio_source_characterization")
+    audio_summary = payload.get("audio_transcript_summary")
+    if not isinstance(audio_source, str) or not isinstance(audio_summary, str):
+      return None
+    audio_source = normalize_space(audio_source)
+    audio_summary = normalize_space(audio_summary)
+    if not audio_source or not audio_summary:
+      return None
+    return {
+      "audio_source_characterization": audio_source,
+      "audio_transcript_summary": audio_summary,
+    }
 
   def review_corpus(self, documents: list[dict[str, object]]) -> dict[str, object] | None:
     summary_blocks: list[str] = []
@@ -2439,6 +2525,8 @@ def analyze_media_item(
         "transcript_excerpt": choose_excerpt(transcript_text, max_length=900) if transcript_text else None,
         "transcript_source": transcript_metadata.get("transcript_source"),
         "transcript_characters": transcript_metadata.get("transcript_characters", 0),
+        "audio_source_characterization": None,
+        "audio_transcript_summary": None,
         "themes": themes,
         "agencies": agencies,
         "top_terms": top_terms,
@@ -2455,6 +2543,23 @@ def analyze_media_item(
     }
     review = find_review_override(review_overrides, path.name)
     needs_transcript_review = bool(transcript_text) and not (isinstance(review, dict) and review.get("transcript_reviewed"))
+    needs_audio_context_review = bool(transcript_text) and not (
+      isinstance(review, dict)
+      and normalize_space(str(review.get("audio_source_characterization") or ""))
+      and normalize_space(str(review.get("audio_transcript_summary") or ""))
+    )
+    if reviewer is not None and needs_audio_context_review and isinstance(review, dict) and not force_review_refresh:
+      generated_audio_context = reviewer.review_audio_transcript_context(
+        document=document,
+        manifest_narrative=narrative,
+        transcript_text=transcript_text,
+      )
+      if generated_audio_context:
+        updated_review = dict(review)
+        updated_review.update(generated_audio_context)
+        review_overrides[path.name] = updated_review
+        review = updated_review
+
     if reviewer is not None and (review is None or force_review_refresh or not review_has_evidence_category(review) or needs_transcript_review):
       generated_review = reviewer.review_media_item(
           document=document,
@@ -2469,9 +2574,74 @@ def analyze_media_item(
         updated_review.update(generated_review)
         if transcript_text:
           updated_review["transcript_reviewed"] = True
+          if "audio_source_characterization" not in updated_review or "audio_transcript_summary" not in updated_review:
+            generated_audio_context = reviewer.review_audio_transcript_context(
+              document=document,
+              manifest_narrative=narrative,
+              transcript_text=transcript_text,
+            )
+            if generated_audio_context:
+              updated_review.update(generated_audio_context)
         review_overrides[path.name] = updated_review
         review = updated_review
     return apply_review_override(document, review)
+
+
+def refresh_audio_context_reviews(
+    source_paths: list[Path],
+    transcript_cache_dir: Path,
+    source_manifest: dict[str, dict[str, object]],
+    review_overrides: dict[str, dict[str, object]],
+    review_file: Path,
+    reviewer: LocalModelReviewer,
+) -> tuple[int, int]:
+    candidates = 0
+    updates = 0
+    for path in source_paths:
+      if path.suffix.lower() in PDF_EXTENSIONS:
+        continue
+      transcript_text, _ = read_cached_transcript(transcript_cache_dir, path)
+      if not transcript_text:
+        continue
+      candidates += 1
+
+      review = find_review_override(review_overrides, path.name)
+      if isinstance(review, dict) and review.get("audio_source_characterization") and review.get("audio_transcript_summary"):
+        continue
+
+      source_metadata = source_manifest.get(path.name) or {}
+      manifest_media_type = normalize_space(str(source_metadata.get("media_type") or "")).lower()
+      media_type = manifest_media_type if manifest_media_type in MEDIA_TYPES else ("image" if path.suffix.lower() in IMAGE_EXTENSIONS else "video")
+      title = manifest_text(source_metadata, "title") or slug_title(path.stem)
+      narrative = manifest_text(
+          source_metadata,
+          "narrative",
+          "description_blurb",
+          "dvids_description",
+          "dvids_title",
+      )
+      document = {
+        "filename": path.name,
+        "title": title,
+        "media_type": media_type,
+        "document_type": "Audio" if media_type == "audio" else "Video",
+      }
+      generated_audio_context = reviewer.review_audio_transcript_context(
+        document=document,
+        manifest_narrative=narrative,
+        transcript_text=transcript_text,
+      )
+      if not generated_audio_context:
+        continue
+
+      updated_review = dict(review) if isinstance(review, dict) else {}
+      updated_review.update(generated_audio_context)
+      updated_review["transcript_reviewed"] = True
+      review_overrides[path.name] = updated_review
+      write_review_overrides(review_file, review_overrides)
+      updates += 1
+
+    return candidates, updates
 
 
 def build_research_signals(documents: list[dict[str, object]]) -> list[str]:
@@ -2633,9 +2803,55 @@ def normalize_executive_summary_review(
       return None
     return {
       "sections": sections[:5],
-      "source": review.get("review_source"),
+      "source": public_review_source(review.get("review_source")),
       "generated_at": review.get("generated_at"),
     }
+
+
+def public_review_source(value: object) -> str | None:
+    if not isinstance(value, str) or not normalize_space(value):
+      return None
+    normalized = normalize_space(value)
+    lowered = normalized.lower()
+    if lowered.startswith("local_model:"):
+      return "Local AI review"
+    if lowered in {"manual_ai_review", "manual ai review"}:
+      return "Manual AI review"
+    if lowered == "scripted_extraction":
+      return "Scripted extraction"
+    return normalized
+
+
+def sanitize_dashboard_value(value: object) -> object:
+    if isinstance(value, dict):
+      cleaned: dict[str, object] = {}
+      for key, nested in value.items():
+        if key == "transcript_model":
+          continue
+        if key == "transcript_excerpt":
+          continue
+        if key == "transcript_source":
+          continue
+        if key == "review_source":
+          public_source = public_review_source(nested)
+          if public_source:
+            cleaned[key] = public_source
+          continue
+        if key == "source":
+          public_source = public_review_source(nested)
+          cleaned[key] = public_source if public_source else sanitize_dashboard_value(nested)
+          continue
+        cleaned[key] = sanitize_dashboard_value(nested)
+      return cleaned
+    if isinstance(value, list):
+      return [sanitize_dashboard_value(item) for item in value]
+    if isinstance(value, str) and value.lower().startswith("local_model:"):
+      return "Local AI review"
+    return value
+
+
+def sanitize_dashboard_document(document: dict[str, object]) -> dict[str, object]:
+    return sanitize_dashboard_value(document)  # type: ignore[return-value]
 
 
 def build_analysis(
@@ -2643,6 +2859,8 @@ def build_analysis(
     source_dir: Path,
     executive_summary: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    public_documents = [sanitize_dashboard_document(document) for document in documents]
+    public_executive_summary = sanitize_dashboard_value(executive_summary) if executive_summary else None
     year_counts = Counter(doc["year"] for doc in documents if isinstance(doc.get("year"), int))
     type_counts = Counter(doc["document_type"] for doc in documents)
     method_counts = Counter(doc["extraction_method"] for doc in documents)
@@ -2696,8 +2914,8 @@ def build_analysis(
         "keyword_counts": [{"term": term, "count": count} for term, count in keyword_counts.most_common(28)],
         "hotspots": sorted(hotspots.values(), key=lambda item: item["count"], reverse=True),
         "research_signals": build_research_signals(documents),
-        "executive_summary": executive_summary,
-        "documents": documents,
+        "executive_summary": public_executive_summary,
+        "documents": public_documents,
     }
     return analysis
 
@@ -3929,6 +4147,52 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
       return 'Source thumbnail';
     }
 
+    function formatExtractionMethod(value) {
+      return String(value || '')
+        .replaceAll('_', ' ')
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    }
+
+    function isVisualSource(doc) {
+      if (doc.media_type === 'image' || doc.media_type === 'video') return true;
+      if (doc.media_type === 'audio') return false;
+      return doc.document_type === 'Imagery' || (doc.themes || []).includes('Imagery and Visuals');
+    }
+
+    function sourceContextSection(doc) {
+      if (doc.media_type === 'audio') {
+        const source = doc.audio_source_characterization
+          ? `${doc.audio_source_characterization}. `
+          : '';
+        const summary = doc.audio_transcript_summary || 'No usable audio transcript summary was generated for this source.';
+        return `<div class="muted"><strong>Audio:</strong> ${escapeHtml(source + summary)}</div>`;
+      }
+
+      if (isVisualSource(doc) && doc.visual_observations) {
+        return `<div class="muted"><strong>Visual:</strong> ${escapeHtml(doc.visual_observations)}</div>`;
+      }
+
+      if (doc.audio_transcript_summary) {
+        const source = doc.audio_source_characterization
+          ? `${doc.audio_source_characterization}. `
+          : '';
+        return `<div class="muted"><strong>Audio:</strong> ${escapeHtml(source + doc.audio_transcript_summary)}</div>`;
+      }
+
+      const attributes = [];
+      if (doc.document_type) attributes.push(doc.document_type);
+      if (doc.page_count) attributes.push(`${doc.page_count} page${doc.page_count === 1 ? '' : 's'}`);
+      if (doc.extraction_method) attributes.push(formatExtractionMethod(doc.extraction_method));
+      if (doc.review_source) attributes.push(`reviewed via ${doc.review_source}`);
+      const provenance = doc.original_source_url || doc.source_page_url
+        ? 'Source provenance is linked from the title.'
+        : 'Source provenance is the local archive file.';
+      const description = attributes.length
+        ? `${attributes.join(' · ')}. ${provenance}`
+        : provenance;
+      return `<div class="muted"><strong>Document:</strong> ${escapeHtml(description)}</div>`;
+    }
+
     function resetDocumentPage() {
       state.page = 1;
     }
@@ -3948,6 +4212,8 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           doc.title,
           doc.summary_narrative,
           doc.visual_observations || '',
+          doc.audio_source_characterization || '',
+          doc.audio_transcript_summary || '',
           ...(doc.themes || []),
           ...(doc.agencies || []),
           ...(doc.top_terms || []),
@@ -4362,9 +4628,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
           doc.ocr_skipped_pages ? `${doc.ocr_skipped_pages} OCR pages deferred` : '',
           doc.review_status === 'reviewed' ? 'Reviewed narrative' : '',
         ].filter(Boolean).join(' · ');
-        const visualNote = doc.visual_observations
-          ? `<div class="muted">Visual: ${escapeHtml(doc.visual_observations)}</div>`
-          : '';
+        const sourceContext = sourceContextSection(doc);
         const href = sourceHref(doc);
         const previewPanel = doc.thumbnail_url
           ? `<details class="source-preview">
@@ -4387,7 +4651,7 @@ def render_dashboard_html(analysis: dict[str, object]) -> str:
               <div class="muted">${escapeHtml(doc.evidence_category_description || '')}</div>
             </td>
             <td data-label="Profile">${escapeHtml(profile)}</td>
-            <td data-label="Summary Narrative">${escapeHtml(doc.summary_narrative || 'No summary narrative available.')}${visualNote}</td>
+            <td data-label="Summary Narrative">${escapeHtml(doc.summary_narrative || 'No summary narrative available.')}${sourceContext}</td>
           </tr>`;
       }).join('');
       const paginationSummary = totalItems
@@ -4674,6 +4938,8 @@ def main() -> int:
         raise FileNotFoundError(f"Source directory does not exist: {source_dir}")
     if args.refresh_reviews and args.review_mode != "hybrid":
         raise ValueError("--refresh-reviews requires --review-mode hybrid")
+    if args.refresh_audio_context_only and args.review_mode != "hybrid":
+        raise ValueError("--refresh-audio-context-only requires --review-mode hybrid")
 
     ocr_limit = None if args.ocr_max_pages_per_document == 0 else args.ocr_max_pages_per_document
     resolver = PlaceResolver()
@@ -4696,6 +4962,21 @@ def main() -> int:
     source_paths, skipped_duplicate_paths = dedupe_source_paths(source_paths, source_manifest)
     if args.max_docs is not None:
         source_paths = source_paths[: args.max_docs]
+
+    if args.refresh_audio_context_only:
+        if reviewer is None:
+            raise ValueError("--refresh-audio-context-only requires a reviewer")
+        candidates, updates = refresh_audio_context_reviews(
+            source_paths=source_paths,
+            transcript_cache_dir=args.transcript_cache_dir,
+            source_manifest=source_manifest,
+            review_overrides=review_overrides,
+            review_file=args.review_file,
+            reviewer=reviewer,
+        )
+        print(f"Scanned {candidates} transcript-backed media sources")
+        print(f"Updated {updates} audio context reviews")
+        return 0
 
     documents: list[dict[str, object]] = []
     cached_documents = 0
