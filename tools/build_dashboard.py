@@ -39,6 +39,7 @@ DEFAULT_DOCUMENT_CACHE_DIR = REPO_ROOT / "data" / "processed" / "documents"
 DEFAULT_TRANSCRIPT_CACHE_DIR = REPO_ROOT / "data" / "processed" / "transcripts"
 DEFAULT_SOURCE_MANIFEST = REPO_ROOT / "data" / "processed" / "source_manifest.json"
 DEFAULT_REVIEW_FILE = REPO_ROOT / "data" / "reviewed" / "document_reviews.json"
+DEFAULT_EMBEDDING_CACHE = REPO_ROOT / "data" / "processed" / "source_embeddings.json"
 DEFAULT_SITE_URL = "https://ufo-analysis.rittmuller.com"
 
 SEO_TITLE = "UAP/UFO Research Dashboard | Public Government Records Analysis"
@@ -50,8 +51,9 @@ SEO_IMAGE_PATH = "assets/hero-classified-saucer.png"
 SEO_FAVICON_PATH = "favicon.svg"
 
 
-DOCUMENT_CACHE_VERSION = 2
+DOCUMENT_CACHE_VERSION = 3
 SOURCE_MANIFEST_VERSION = 1
+EMBEDDING_CACHE_VERSION = 1
 EXECUTIVE_SUMMARY_REVIEW_KEY = "__corpus_executive_summary__"
 EXECUTIVE_SUMMARY_VERSION = 2
 
@@ -571,6 +573,228 @@ DOCUMENT_TYPE_PATTERNS = [
 
 DOCUMENT_TYPE_LABELS = {label for label, _ in DOCUMENT_TYPE_PATTERNS} | {"Research File", "UAP Report"}
 
+TREND_FIELD_DEFINITIONS: dict[str, dict[str, object]] = {
+    "event_count": {
+        "type": "integer_or_null",
+        "description": "Estimated number of distinct UAP/UFO events or sightings described by this source; 0 for non-event material.",
+    },
+    "event_record_type": {
+        "type": "enum",
+        "values": [
+            "sighting",
+            "sensor_detection",
+            "investigation_or_followup",
+            "media_asset",
+            "transcript_or_audio_account",
+            "policy_or_research_discussion",
+            "explanation_or_debunk",
+            "non_event_context",
+            "unknown",
+        ],
+    },
+    "primary_observation_mode": {
+        "type": "enum",
+        "values": [
+            "naked_eye_visual",
+            "cockpit_visual",
+            "ground_visual",
+            "photo_image",
+            "eo_video",
+            "ir_thermal",
+            "radar",
+            "rf_sigint",
+            "audio_testimony",
+            "transcript",
+            "mixed",
+            "none_stated",
+            "unknown",
+        ],
+    },
+    "sensor_platform": {
+        "type": "enum",
+        "values": [
+            "aircraft",
+            "ground_station_or_tower",
+            "ship_or_maritime",
+            "spacecraft",
+            "handheld_or_consumer_camera",
+            "facility_security_system",
+            "not_applicable",
+            "unknown",
+        ],
+    },
+    "observer_platform": {
+        "type": "enum",
+        "values": [
+            "ground",
+            "aircraft",
+            "vehicle",
+            "ship_or_boat",
+            "spacecraft",
+            "facility",
+            "multiple",
+            "not_applicable",
+            "unknown",
+        ],
+    },
+    "observer_roles": {
+        "type": "enum_list",
+        "values": [
+            "pilot_or_aircrew",
+            "sensor_operator",
+            "intelligence_official",
+            "contractor",
+            "civilian",
+            "law_enforcement",
+            "astronaut",
+            "military_personnel",
+            "analyst_or_investigator",
+            "diplomatic_or_government_reporter",
+            "unknown",
+            "not_applicable",
+        ],
+    },
+    "witness_count_bucket": {
+        "type": "enum",
+        "values": ["none", "single", "two_to_three", "group", "multiple_independent_groups", "unknown"],
+    },
+    "corroboration_types": {
+        "type": "enum_list",
+        "values": [
+            "none_stated",
+            "multiple_witnesses",
+            "multiple_sensors",
+            "photo_or_video",
+            "radar_or_sensor",
+            "physical_trace",
+            "official_investigation",
+            "transcript_or_audio",
+            "unclear",
+        ],
+    },
+    "chain_of_custody_quality": {
+        "type": "enum",
+        "values": [
+            "original_or_near_original_report",
+            "official_summary_or_memo",
+            "official_media_release",
+            "uploaded_or_altered_media",
+            "archival_clipping_or_secondhand",
+            "compiled_multi_case_file",
+            "unknown",
+        ],
+    },
+    "redaction_level": {
+        "type": "enum",
+        "values": ["none", "minor", "moderate", "heavy", "unknown"],
+    },
+    "event_time_precision": {
+        "type": "enum",
+        "values": ["exact_utc", "exact_local", "full_date", "month_year", "year_only", "range_only", "unknown"],
+    },
+    "location_precision": {
+        "type": "enum",
+        "values": [
+            "coordinates",
+            "site_or_facility",
+            "city_or_local_area",
+            "region_or_maritime_area",
+            "country",
+            "command_area",
+            "space_or_orbit",
+            "unknown_redacted",
+        ],
+    },
+    "environment_context_present": {"type": "boolean"},
+    "day_night_context": {
+        "type": "enum",
+        "values": ["daylight", "night", "dawn_or_dusk", "space_or_orbit", "indoor_or_internal_visual_effect", "unknown"],
+    },
+    "object_count_bucket": {
+        "type": "enum",
+        "values": ["none", "one", "two", "three_to_five", "many_or_swarm", "unknown"],
+    },
+    "morphology_normalized": {
+        "type": "enum_list",
+        "values": [
+            "sphere_or_orb",
+            "disc_or_saucer",
+            "cylinder_cigar_tictac",
+            "triangle",
+            "light_point",
+            "fireball",
+            "irregular_blob_or_area_of_contrast",
+            "formation_only",
+            "none_stated",
+            "unknown",
+        ],
+    },
+    "color_luminosity_normalized": {
+        "type": "enum_list",
+        "values": [
+            "white_or_bright",
+            "orange",
+            "green",
+            "red",
+            "blue",
+            "metallic",
+            "dark",
+            "transparent_or_translucent",
+            "thermal_bright",
+            "pulsing_or_flashing",
+            "none_stated",
+            "unknown",
+        ],
+    },
+    "apparent_motion_class": {
+        "type": "enum_list",
+        "values": [
+            "stationary_hover",
+            "straight_line_transit",
+            "ascending_or_descending",
+            "erratic_or_abrupt",
+            "accelerating_or_departing",
+            "disappearing_or_dissipating",
+            "obscured_or_cloud_traversal",
+            "water_interaction",
+            "no_motion_stated",
+            "unknown",
+        ],
+    },
+    "mundane_explanation_present": {
+        "type": "enum",
+        "values": ["yes_source_resolved", "yes_source_suggested", "no", "unclear"],
+    },
+    "resolution_status": {
+        "type": "enum",
+        "values": ["unresolved", "explained", "partially_explained", "disputed", "informational_only", "not_an_event", "unknown"],
+    },
+    "media_authenticity_notes": {
+        "type": "string_or_null",
+        "description": "Short note on redactions, enhancement, alteration, excerpts, chain-of-custody caveats, or null if none stated.",
+    },
+    "measurement_quality": {
+        "type": "enum",
+        "values": ["qualitative_only", "estimated_values", "instrument_derived_values", "calibrated_telemetry", "no_measurements", "unknown"],
+    },
+    "quantitative_fields_present": {
+        "type": "enum_list",
+        "values": [
+            "altitude",
+            "speed",
+            "heading_or_bearing",
+            "coordinates",
+            "duration",
+            "range_or_distance",
+            "angular_size",
+            "sensor_metadata",
+            "none",
+        ],
+    },
+}
+
+TREND_FIELD_NAMES = tuple(TREND_FIELD_DEFINITIONS.keys())
+
 MANUAL_LOCATION_COORDS = {
     "arabian gulf": (26.0000, 52.5000, "Arabian Gulf", "region"),
     "persian gulf": (26.0000, 52.5000, "Persian Gulf", "region"),
@@ -728,6 +952,56 @@ def parse_args() -> argparse.Namespace:
       type=int,
       default=2,
       help="Maximum number of rendered PDF page images to send with each multimodal review request.",
+    )
+    parser.add_argument(
+      "--related-sources-mode",
+      choices=("auto", "off"),
+      default="auto",
+      help="Use source embeddings to attach related_sources to each document. Use off to skip relationship generation.",
+    )
+    parser.add_argument(
+      "--embedding-model",
+      default="Qwen3-Embedding-0.6B-4bit-DWQ",
+      help="OpenAI-compatible embedding model name used to identify related sources.",
+    )
+    parser.add_argument(
+      "--embedding-base-url",
+      default=None,
+      help="Base URL for embeddings. Defaults to --review-base-url.",
+    )
+    parser.add_argument(
+      "--embedding-api-key",
+      default=None,
+      help="API key for embeddings. Defaults to --review-api-key.",
+    )
+    parser.add_argument(
+      "--embedding-timeout",
+      type=int,
+      default=180,
+      help="Timeout in seconds for each embedding request.",
+    )
+    parser.add_argument(
+      "--embedding-cache",
+      type=Path,
+      default=DEFAULT_EMBEDDING_CACHE,
+      help="JSON cache for per-source embeddings.",
+    )
+    parser.add_argument(
+      "--refresh-embeddings",
+      action="store_true",
+      help="Ignore cached embeddings and request fresh vectors.",
+    )
+    parser.add_argument(
+      "--related-sources-limit",
+      type=int,
+      default=6,
+      help="Maximum number of related sources to attach to each document.",
+    )
+    parser.add_argument(
+      "--related-sources-min-score",
+      type=float,
+      default=0.25,
+      help="Minimum cosine similarity required for a related source link.",
     )
     parser.add_argument(
         "--max-docs",
@@ -979,7 +1253,7 @@ def load_document_cache(
   if not isinstance(document, dict):
     return None
 
-  payload["document"] = annotate_evidence_classification(document)
+  payload["document"] = annotate_evidence_classification(ensure_trend_review_fields(document))
 
   return payload
 
@@ -1011,18 +1285,125 @@ def write_document_cache(
   cache_file.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def normalize_enum_token(value: object) -> str:
+  return normalize_space(str(value)).lower().replace(" ", "_").replace("-", "_")
+
+
+def normalize_enum_value(value: object, allowed_values: list[str], default: str) -> str:
+  if isinstance(value, str):
+    normalized = normalize_enum_token(value)
+    allowed_by_normalized = {normalize_enum_token(item): item for item in allowed_values}
+    if normalized in allowed_by_normalized:
+      return allowed_by_normalized[normalized]
+  return default
+
+
+def normalize_enum_list(value: object, allowed_values: list[str], default: str = "unknown") -> list[str]:
+  raw_items = value if isinstance(value, list) else [value]
+  cleaned: list[str] = []
+  for item in raw_items:
+    if not isinstance(item, str):
+      continue
+    normalized = normalize_enum_value(item, allowed_values, "")
+    if normalized and normalized not in cleaned:
+      cleaned.append(normalized)
+
+  if cleaned:
+    if len(cleaned) > 1:
+      cleaned = [item for item in cleaned if item not in {"unknown", "none", "none_stated", "not_applicable", "unclear"}]
+    return cleaned[:8] if cleaned else [default]
+  return [default]
+
+
+def normalize_trend_review_fields(payload: dict[str, object]) -> dict[str, object]:
+  trend: dict[str, object] = {}
+  for field_name, definition in TREND_FIELD_DEFINITIONS.items():
+    field_type = str(definition.get("type") or "")
+    raw_value = payload.get(field_name)
+
+    if field_type == "integer_or_null":
+      if isinstance(raw_value, bool):
+        trend[field_name] = None
+      elif isinstance(raw_value, int):
+        trend[field_name] = max(0, min(raw_value, 1000))
+      elif isinstance(raw_value, str) and raw_value.strip().isdigit():
+        trend[field_name] = max(0, min(int(raw_value.strip()), 1000))
+      else:
+        trend[field_name] = None
+      continue
+
+    if field_type == "boolean":
+      trend[field_name] = raw_value if isinstance(raw_value, bool) else False
+      continue
+
+    if field_type == "string_or_null":
+      trend[field_name] = normalize_space(raw_value) if isinstance(raw_value, str) and normalize_space(raw_value) else None
+      continue
+
+    values = [str(value) for value in definition.get("values", []) if isinstance(value, str)]
+    if field_type == "enum":
+      default = values[-1] if values else "unknown"
+      trend[field_name] = normalize_enum_value(raw_value, values, default)
+      continue
+
+    if field_type == "enum_list":
+      default = "unknown"
+      if "none" in values:
+        default = "none"
+      elif "none_stated" in values:
+        default = "none_stated"
+      trend[field_name] = normalize_enum_list(raw_value, values, default=default)
+
+  return trend
+
+
+def ensure_trend_review_fields(document: dict[str, object]) -> dict[str, object]:
+  merged = dict(document)
+  merged.update(normalize_trend_review_fields(merged))
+  return merged
+
+
+def review_has_trend_fields(review: dict[str, object] | None) -> bool:
+  if not isinstance(review, dict):
+    return False
+  normalized = normalize_trend_review_fields(review)
+  return all(field_name in review and normalized.get(field_name) == review.get(field_name) for field_name in TREND_FIELD_NAMES)
+
+
+def review_has_required_fields(review: dict[str, object] | None) -> bool:
+  return review_has_evidence_category(review) and review_has_trend_fields(review)
+
+
+def trend_review_prompt_instructions() -> str:
+  field_lines: list[str] = []
+  for field_name, definition in TREND_FIELD_DEFINITIONS.items():
+    field_type = str(definition.get("type") or "")
+    values = definition.get("values")
+    if isinstance(values, list):
+      field_lines.append(f"- {field_name}: {field_type}; allowed values: {', '.join(str(value) for value in values)}.")
+    else:
+      description = normalize_space(str(definition.get("description") or field_type))
+      field_lines.append(f"- {field_name}: {field_type}; {description}")
+  return (
+    "Also extract these high-confidence trend fields. Use only information supported by the source text, attached media, transcript, or manifest context. "
+    "Prefer unknown, none, none_stated, unclear, or null instead of guessing. "
+    "For list fields, return an array of allowed values. For environment_context_present, return true only when the material explicitly mentions weather, cloud, visibility, lighting, sea state, moon/night/day context, or similar environmental context.\n"
+    + "\n".join(field_lines)
+  )
+
+
 def apply_review_override(document: dict[str, object], review: dict[str, object] | None) -> dict[str, object]:
   document.setdefault("visual_observations", None)
   document.setdefault("review_status", "generated")
   document.setdefault("review_source", "scripted_extraction")
   if not review:
-    return annotate_evidence_classification(normalize_document_after_review(document))
+    return annotate_evidence_classification(normalize_document_after_review(ensure_trend_review_fields(document)))
 
   merged = dict(document)
   merged.update(review)
   merged.setdefault("review_status", "reviewed")
   merged.setdefault("review_source", "manual_ai_review")
-  return annotate_evidence_classification(normalize_document_after_review(merged))
+  return annotate_evidence_classification(normalize_document_after_review(ensure_trend_review_fields(merged)))
 
 
 def normalize_document_after_review(document: dict[str, object]) -> dict[str, object]:
@@ -1696,6 +2077,8 @@ class LocalModelReviewer:
     if model_evidence_category is not None:
       review["evidence_category"] = model_evidence_category["label"]
 
+    review.update(normalize_trend_review_fields(payload))
+
     audio_source = payload.get("audio_source_characterization")
     if isinstance(audio_source, str) and normalize_space(audio_source):
       review["audio_source_characterization"] = normalize_space(audio_source)
@@ -1737,7 +2120,8 @@ class LocalModelReviewer:
       "The extracted text may contain OCR noise. Use the text and any attached page images to infer what is actually present. "
       "Keep the document's general overview, but prioritize identifying any concrete UAP/UFO activity, sightings, incidents, or explicit lack of such activity. "
       "If the document is large or compiled from multiple items, synthesize systematically from the full sample instead of over-weighting the opening page. "
-      "Return only a JSON object with these keys: summary_narrative, visual_observations, document_type, themes, agencies, location_label, evidence_category. "
+      "Return only a JSON object with these keys: summary_narrative, visual_observations, document_type, themes, agencies, location_label, evidence_category, "
+      f"{', '.join(TREND_FIELD_NAMES)}. "
       f"document_type must be one of {sorted(DOCUMENT_TYPE_LABELS)}. "
       f"themes must be chosen only from {sorted(THEME_KEYWORDS)}. "
       f"evidence_category must be one of {[definition['label'] for definition in EVIDENCE_CATEGORY_DEFINITIONS]}. "
@@ -1749,6 +2133,7 @@ class LocalModelReviewer:
       "summary_narrative must be 4 sentences covering who, the document's overall subject, where, and significance. "
       "Within those 4 sentences, explicitly state what UAP/UFO activity is described, where in the document it appears if that can be inferred from the sampled pages or sections, and say clearly when no actual UAP/UFO activity is present. "
       "visual_observations should describe only visible imagery or scene evidence and be null when there is no meaningful visual evidence beyond text formatting.\n\n"
+      f"{trend_review_prompt_instructions()}\n\n"
       f"Filename: {document['filename']}\n"
       f"Title: {document['title']}\n"
       f"Current document type hint: {document.get('document_type')}\n"
@@ -1772,7 +2157,16 @@ class LocalModelReviewer:
         )
 
     try:
-      response = self._chat([{"role": "user", "content": content}])
+      response = self._chat(
+        [
+          {
+            "role": "system",
+            "content": "You are a JSON API. Return only the requested JSON object. Do not include reasoning, markdown, or explanatory text.",
+          },
+          {"role": "user", "content": content},
+        ],
+        response_format={"type": "json_object"},
+      )
     except (urllib_error.URLError, TimeoutError, json.JSONDecodeError):
       return None
 
@@ -1795,7 +2189,8 @@ class LocalModelReviewer:
       "For videos, the attached frames are samples from the clip; describe visible objects, sensor overlays, scene context, apparent motion cues only when the frames support them, and any uncertainty. "
       "When transcript text is provided, use it as evidence for audible narration, cockpit audio, captions, or spoken context, while still separating what is visible from what is spoken. "
       "Do not invent conclusions about identity, speed, altitude, intent, or authenticity. "
-      "Return only a JSON object with these keys: summary_narrative, visual_observations, document_type, themes, agencies, location_label, evidence_category, audio_source_characterization, audio_transcript_summary. "
+      "Return only a JSON object with these keys: summary_narrative, visual_observations, document_type, themes, agencies, location_label, evidence_category, audio_source_characterization, audio_transcript_summary, "
+      f"{', '.join(TREND_FIELD_NAMES)}. "
       f"document_type must be one of {sorted(DOCUMENT_TYPE_LABELS)}. "
       f"themes must be chosen only from {sorted(THEME_KEYWORDS)}. "
       f"evidence_category must be one of {[definition['label'] for definition in EVIDENCE_CATEGORY_DEFINITIONS]}. "
@@ -1804,6 +2199,7 @@ class LocalModelReviewer:
       "audio_source_characterization must be a short LLM-generated phrase describing the actual kind of audio source, such as mission radio transmission, cockpit intercom, recorded interview, press briefing narration, or archival mission audio; use null when no transcript text is provided. "
       "audio_transcript_summary must be a concise LLM-generated summary of what the transcript says, not a verbatim quote; use null when no transcript text is provided. "
       "If the image or frames do not show a meaningful anomalous object, say so clearly.\n\n"
+      f"{trend_review_prompt_instructions()}\n\n"
       f"Filename: {document['filename']}\n"
       f"Title: {document['title']}\n"
       f"Media type: {media_type}\n"
@@ -1832,7 +2228,16 @@ class LocalModelReviewer:
       content.append({"type": "image_url", "image_url": {"url": data_url}})
 
     try:
-      response = self._chat([{"role": "user", "content": content}])
+      response = self._chat(
+        [
+          {
+            "role": "system",
+            "content": "You are a JSON API. Return only the requested JSON object. Do not include reasoning, markdown, or explanatory text.",
+          },
+          {"role": "user", "content": content},
+        ],
+        response_format={"type": "json_object"},
+      )
     except (urllib_error.URLError, TimeoutError, json.JSONDecodeError):
       return None
     return self._parse_review_response(response, resolver)
@@ -2644,7 +3049,7 @@ def analyze_document(
         else None,
     }
     review = find_review_override(review_overrides, path.name)
-    if reviewer is not None and (review is None or force_review_refresh or not review_has_evidence_category(review)):
+    if reviewer is not None and (review is None or force_review_refresh or not review_has_required_fields(review)):
       generated_review = reviewer.review_document(document, doc, combined_text, resolver)
       if generated_review:
         updated_review = dict(review) if isinstance(review, dict) else {}
@@ -2863,7 +3268,7 @@ def analyze_media_item(
         review_overrides[path.name] = updated_review
         review = updated_review
 
-    if reviewer is not None and (review is None or force_review_refresh or not review_has_evidence_category(review) or needs_transcript_review):
+    if reviewer is not None and (review is None or force_review_refresh or not review_has_required_fields(review) or needs_transcript_review):
       generated_review = reviewer.review_media_item(
           document=document,
           path=path,
@@ -2993,6 +3398,11 @@ def build_executive_summary_signature(documents: list[dict[str, object]]) -> str
           "document_type": document.get("document_type"),
           "evidence_category": document.get("evidence_category"),
           "themes": document.get("themes", []),
+          "trend_fields": {
+            field_name: document.get(field_name)
+            for field_name in TREND_FIELD_NAMES
+            if field_name != "media_authenticity_notes"
+          },
           "location": location.get("label") if isinstance(location, dict) else None,
           "summary_narrative": document.get("summary_narrative"),
         }
@@ -3162,10 +3572,441 @@ def sanitize_dashboard_document(document: dict[str, object]) -> dict[str, object
     return sanitize_dashboard_value(document)  # type: ignore[return-value]
 
 
+@dataclass
+class EmbeddingClient:
+  base_url: str
+  model_name: str
+  timeout_seconds: int
+  api_key: str | None = None
+
+  def _embedding_request(self, input_value: str | list[str]) -> list[list[float]] | None:
+    expected_count = len(input_value) if isinstance(input_value, list) else 1
+
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if self.api_key:
+      headers["Authorization"] = f"Bearer {self.api_key}"
+    base_url = self.base_url.rstrip("/")
+    if not base_url.endswith("/v1"):
+      base_url = f"{base_url}/v1"
+    request = urllib_request.Request(
+      url=f"{base_url}/embeddings",
+      data=json.dumps({"model": self.model_name, "input": input_value}).encode("utf-8"),
+      headers=headers,
+      method="POST",
+    )
+
+    try:
+      with urllib_request.urlopen(request, timeout=self.timeout_seconds) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    except (urllib_error.URLError, TimeoutError, json.JSONDecodeError):
+      return None
+
+    data = payload.get("data")
+    if not isinstance(data, list):
+      return None
+
+    ordered_embeddings: list[tuple[int, list[float]]] = []
+    for fallback_index, item in enumerate(data):
+      if not isinstance(item, dict):
+        return None
+      raw_embedding = item.get("embedding")
+      if not isinstance(raw_embedding, list):
+        return None
+      embedding: list[float] = []
+      for value in raw_embedding:
+        if not isinstance(value, (int, float)):
+          return None
+        embedding.append(float(value))
+      if not embedding:
+        return None
+      raw_index = item.get("index")
+      index = int(raw_index) if isinstance(raw_index, int) else fallback_index
+      ordered_embeddings.append((index, embedding))
+
+    ordered_embeddings.sort(key=lambda item: item[0])
+    embeddings = [embedding for _, embedding in ordered_embeddings]
+    return embeddings if len(embeddings) == expected_count else None
+
+  def embed_batch(self, texts: list[str]) -> list[list[float]] | None:
+    if not texts:
+      return []
+
+    embeddings = self._embedding_request(texts)
+    if embeddings is not None:
+      return embeddings
+
+    fallback_embeddings: list[list[float]] = []
+    for text in texts:
+      single = self._embedding_request(text)
+      if single is None or len(single) != 1:
+        return None
+      fallback_embeddings.append(single[0])
+    return fallback_embeddings
+
+
+def build_trend_field_counts(documents: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
+    trend_counts: dict[str, list[dict[str, object]]] = {}
+    for field_name, definition in TREND_FIELD_DEFINITIONS.items():
+      if definition.get("type") == "string_or_null":
+        continue
+
+      counter: Counter[object] = Counter()
+      for document in documents:
+        value = document.get(field_name)
+        if isinstance(value, list):
+          counter.update(item for item in value if item is not None)
+        elif value is not None:
+          counter[value] += 1
+
+      trend_counts[field_name] = [
+        {"label": str(label).lower() if isinstance(label, bool) else label, "count": count}
+        for label, count in counter.most_common()
+      ]
+    return trend_counts
+
+
+RELATED_IGNORE_TOKENS = {
+    "",
+    "false",
+    "not_applicable",
+    "none",
+    "none_stated",
+    "unclear",
+    "unknown",
+    "unknown_redacted",
+}
+RELATED_GENERIC_THEMES = {
+    "anomalous_objects",
+    "imagery_and_visuals",
+}
+RELATED_METADATA_TREND_FIELDS = (
+    "sensor_platform",
+    "observer_platform",
+    "observer_roles",
+    "corroboration_types",
+    "object_count_bucket",
+    "morphology_normalized",
+    "color_luminosity_normalized",
+    "apparent_motion_class",
+    "transmedium_capabilities",
+    "anomalous_signatures",
+    "equipment_malfunction",
+    "biological_observer_effects",
+    "quantitative_fields_present",
+)
+
+
+def related_signal_token(value: object) -> str:
+    if value is None or value is False:
+      return ""
+    if isinstance(value, bool):
+      return "true" if value else ""
+    return normalize_enum_token(str(value))
+
+
+def is_related_signal_value(value: object) -> bool:
+    return related_signal_token(value) not in RELATED_IGNORE_TOKENS
+
+
+def related_string_values(document: dict[str, object], field_name: str) -> set[str]:
+    if field_name == "capability_labels":
+      value = document.get("capability_labels")
+      if isinstance(value, list):
+        return {str(item) for item in value if isinstance(item, str) and is_related_signal_value(item)}
+      return {
+        str(capability["label"])
+        for capability in infer_document_capabilities(document)
+        if is_related_signal_value(capability.get("label"))
+      }
+
+    value = document.get(field_name)
+    if isinstance(value, list):
+      return {str(item) for item in value if isinstance(item, str) and is_related_signal_value(item)}
+    if isinstance(value, str) and is_related_signal_value(value):
+      return {value}
+    return set()
+
+
+def related_location_label(document: dict[str, object]) -> str | None:
+    location = document.get("location")
+    if not isinstance(location, dict):
+      return None
+    label = location.get("label")
+    if isinstance(label, str) and is_related_signal_value(label):
+      return label
+    return None
+
+
+def related_embedding_text(document: dict[str, object]) -> str:
+    parts: list[str] = []
+    title = document.get("title") or document.get("filename")
+    if title:
+      parts.append(f"Source title: {title}")
+
+    summary = document.get("summary_narrative")
+    if isinstance(summary, str) and normalize_space(summary):
+      parts.append(f"Summary: {summary}")
+
+    visual = document.get("visual_observations")
+    if isinstance(visual, str) and normalize_space(visual):
+      parts.append(f"Visual observations: {visual}")
+
+    audio = document.get("audio_transcript_summary")
+    if isinstance(audio, str) and normalize_space(audio):
+      parts.append(f"Audio transcript summary: {audio}")
+
+    metadata_parts: list[str] = []
+    year = document.get("year") or document.get("year_start")
+    if isinstance(year, int):
+      metadata_parts.append(f"year {year}")
+    location_label = related_location_label(document)
+    if location_label:
+      metadata_parts.append(f"location {location_label}")
+
+    themes = {
+      value
+      for value in related_string_values(document, "themes")
+      if related_signal_token(value) not in RELATED_GENERIC_THEMES
+    }
+    agencies = related_string_values(document, "agencies")
+    capability_labels = related_string_values(document, "capability_labels")
+    if themes:
+      metadata_parts.append("themes " + ", ".join(sorted(themes)))
+    if agencies:
+      metadata_parts.append("agencies " + ", ".join(sorted(agencies)))
+    if capability_labels:
+      metadata_parts.append("capabilities " + ", ".join(sorted(capability_labels)))
+    if metadata_parts:
+      parts.append("Relevant metadata: " + "; ".join(metadata_parts))
+
+    trend_values: list[str] = []
+    for field_name in RELATED_METADATA_TREND_FIELDS:
+      value = document.get(field_name)
+      if isinstance(value, list):
+        rendered_values = [str(item) for item in value if is_related_signal_value(item)]
+        if rendered_values:
+          trend_values.append(f"{field_name}: {', '.join(rendered_values)}")
+      elif is_related_signal_value(value):
+        trend_values.append(f"{field_name}: {value}")
+    if trend_values:
+      parts.append("Relationship signals: " + "; ".join(trend_values))
+
+    return normalize_space(" ".join(parts))[:6000]
+
+
+def embedding_signature(model_name: str, text: str) -> str:
+    return hashlib.sha256(f"{model_name}\n{text}".encode("utf-8")).hexdigest()
+
+
+def load_embedding_cache(path: Path, model_name: str) -> dict[str, dict[str, object]]:
+    if not path.exists():
+      return {}
+    try:
+      payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+      return {}
+    if not isinstance(payload, dict):
+      return {}
+    if payload.get("cache_version") != EMBEDDING_CACHE_VERSION or payload.get("model") != model_name:
+      return {}
+    items = payload.get("items")
+    if not isinstance(items, dict):
+      return {}
+    return {key: value for key, value in items.items() if isinstance(key, str) and isinstance(value, dict)}
+
+
+def write_embedding_cache(path: Path, model_name: str, items: dict[str, dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+      "cache_version": EMBEDDING_CACHE_VERSION,
+      "model": model_name,
+      "generated_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+      "items": items,
+    }
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def normalize_embedding(vector: list[float]) -> list[float] | None:
+    magnitude = math.sqrt(sum(value * value for value in vector))
+    if not magnitude:
+      return None
+    return [value / magnitude for value in vector]
+
+
+def shared_related_factors(left: dict[str, object], right: dict[str, object]) -> list[str]:
+    factors: list[str] = []
+
+    def add(label: str) -> None:
+      if label and label not in factors:
+        factors.append(label)
+
+    left_location_label = related_location_label(left)
+    right_location_label = related_location_label(right)
+    if left_location_label and left_location_label == right_location_label:
+      add(f"same location: {left_location_label}")
+
+    left_year = left.get("year")
+    right_year = right.get("year")
+    if isinstance(left_year, int) and isinstance(right_year, int):
+      if left_year == right_year:
+        add(f"same year: {left_year}")
+      elif abs(left_year - right_year) <= 1:
+        add("adjacent event years")
+
+    for field_name, label in (
+      ("themes", "shared theme"),
+      ("agencies", "shared agency"),
+      ("capability_labels", "shared capability"),
+    ):
+      left_values = related_string_values(left, field_name)
+      right_values = related_string_values(right, field_name)
+      if field_name == "themes":
+        left_values = {value for value in left_values if related_signal_token(value) not in RELATED_GENERIC_THEMES}
+        right_values = {value for value in right_values if related_signal_token(value) not in RELATED_GENERIC_THEMES}
+      for value in sorted(left_values & right_values)[:3]:
+        add(f"{label}: {value}")
+
+    for field_name, label in (
+      ("observer_roles", "shared observer role"),
+      ("corroboration_types", "shared corroboration"),
+      ("morphology_normalized", "shared morphology"),
+      ("color_luminosity_normalized", "shared color/luminosity"),
+      ("apparent_motion_class", "shared motion"),
+      ("quantitative_fields_present", "shared quantitative field"),
+    ):
+      left_values = related_string_values(left, field_name)
+      right_values = related_string_values(right, field_name)
+      for value in sorted(left_values & right_values)[:3]:
+        add(f"{label}: {value}")
+
+    return factors[:8]
+
+
+def attach_related_sources(
+    documents: list[dict[str, object]],
+    embedding_client: EmbeddingClient,
+    cache_path: Path,
+    refresh_embeddings: bool,
+    related_limit: int,
+    min_score: float,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    if len(documents) < 2 or related_limit <= 0:
+      return [dict(document, related_sources=[]) for document in documents], {
+        "enabled": False,
+        "reason": "not_enough_documents",
+        "model": embedding_client.model_name,
+      }
+
+    cache_items = {} if refresh_embeddings else load_embedding_cache(cache_path, embedding_client.model_name)
+    texts_by_filename = {str(document.get("filename") or index): related_embedding_text(document) for index, document in enumerate(documents)}
+    signatures = {
+      filename: embedding_signature(embedding_client.model_name, text)
+      for filename, text in texts_by_filename.items()
+    }
+    embeddings: dict[str, list[float]] = {}
+    missing: list[tuple[str, str]] = []
+
+    for filename, text in texts_by_filename.items():
+      cached = cache_items.get(filename)
+      cached_embedding = cached.get("embedding") if isinstance(cached, dict) else None
+      if (
+          isinstance(cached, dict)
+          and cached.get("signature") == signatures[filename]
+          and isinstance(cached_embedding, list)
+          and all(isinstance(value, (int, float)) for value in cached_embedding)
+      ):
+        normalized = normalize_embedding([float(value) for value in cached_embedding])
+        if normalized:
+          embeddings[filename] = normalized
+          continue
+      missing.append((filename, text))
+
+    request_failed = False
+    for batch_start in range(0, len(missing), 16):
+      batch = missing[batch_start : batch_start + 16]
+      batch_embeddings = embedding_client.embed_batch([text for _, text in batch])
+      if batch_embeddings is None:
+        request_failed = True
+        break
+      for (filename, _), vector in zip(batch, batch_embeddings):
+        normalized = normalize_embedding(vector)
+        if not normalized:
+          continue
+        embeddings[filename] = normalized
+        cache_items[filename] = {
+          "signature": signatures[filename],
+          "embedding": vector,
+        }
+
+    if request_failed or len(embeddings) < 2:
+      return [dict(document, related_sources=[]) for document in documents], {
+        "enabled": False,
+        "reason": "embedding_request_failed" if request_failed else "too_few_embeddings",
+        "model": embedding_client.model_name,
+        "embedded_count": len(embeddings),
+      }
+
+    write_embedding_cache(cache_path, embedding_client.model_name, cache_items)
+
+    by_filename = {str(document.get("filename") or index): document for index, document in enumerate(documents)}
+    related_documents: list[dict[str, object]] = []
+    edge_count = 0
+    for index, document in enumerate(documents):
+      filename = str(document.get("filename") or index)
+      source_vector = embeddings.get(filename)
+      if not source_vector:
+        related_documents.append(dict(document, related_sources=[]))
+        continue
+
+      candidates: list[tuple[float, str, list[str]]] = []
+      for other_filename, other_vector in embeddings.items():
+        if other_filename == filename:
+          continue
+        if len(source_vector) != len(other_vector):
+          continue
+        score = sum(left * right for left, right in zip(source_vector, other_vector))
+        if score >= min_score:
+          other = by_filename[other_filename]
+          shared_factors = shared_related_factors(document, other)
+          if shared_factors:
+            candidates.append((score, other_filename, shared_factors))
+      candidates.sort(key=lambda item: (-item[0], item[1]))
+
+      related_sources = []
+      for score, other_filename, shared_factors in candidates[:related_limit]:
+        other = by_filename[other_filename]
+        related_sources.append(
+          {
+            "filename": other.get("filename"),
+            "title": other.get("title"),
+            "source_href": other.get("source_href"),
+            "year": other.get("year"),
+            "document_type": other.get("document_type"),
+            "evidence_category": other.get("evidence_category"),
+            "similarity": round(score, 4),
+            "shared_factors": shared_factors,
+          }
+        )
+      edge_count += len(related_sources)
+      related_documents.append(dict(document, related_sources=related_sources))
+
+    return related_documents, {
+      "enabled": True,
+      "model": embedding_client.model_name,
+      "embedded_count": len(embeddings),
+      "documents_with_related_sources": sum(1 for document in related_documents if document.get("related_sources")),
+      "edge_count": edge_count,
+      "related_sources_limit": related_limit,
+      "minimum_similarity": min_score,
+      "relationship_criteria": "embedding_similarity_plus_shared_unique_source_factors",
+    }
+
+
 def build_analysis(
     documents: list[dict[str, object]],
     source_dir: Path,
     executive_summary: dict[str, object] | None = None,
+    related_source_stats: dict[str, object] | None = None,
 ) -> dict[str, object]:
     documents = [annotate_capabilities(document) for document in documents]
     public_documents = [sanitize_dashboard_document(document) for document in documents]
@@ -3222,6 +4063,15 @@ def build_analysis(
         "agency_counts": [{"label": label, "count": count} for label, count in agency_counts.most_common()],
         "keyword_counts": [{"term": term, "count": count} for term, count in keyword_counts.most_common(28)],
         "hotspots": sorted(hotspots.values(), key=lambda item: item["count"], reverse=True),
+        "trend_field_definitions": {
+          field_name: {
+            key: value
+            for key, value in definition.items()
+            if key in {"type", "values", "description"}
+          }
+          for field_name, definition in TREND_FIELD_DEFINITIONS.items()
+        },
+        "trend_field_counts": build_trend_field_counts(documents),
         "capability_definitions": [
           {
             "key": definition["key"],
@@ -3233,6 +4083,7 @@ def build_analysis(
         ],
         "capability_matrix": build_capability_matrix(documents),
         "research_signals": build_research_signals(documents),
+        "related_source_stats": related_source_stats or {"enabled": False},
         "executive_summary": public_executive_summary,
         "documents": public_documents,
     }
@@ -4052,6 +4903,28 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       border-bottom-color: var(--teal);
     }}
 
+    .source-title-button {{
+      appearance: none;
+      border: 0;
+      border-bottom: 1px solid rgba(214, 168, 79, 0.42);
+      border-radius: 0;
+      background: transparent;
+      color: var(--ink);
+      padding: 0;
+      font: inherit;
+      font-weight: 700;
+      line-height: 1.35;
+      text-align: left;
+      cursor: pointer;
+    }}
+
+    .source-title-button:hover,
+    .source-title-button:focus-visible {{
+      color: var(--teal);
+      outline: none;
+      border-bottom-color: var(--teal);
+    }}
+
     .source-preview {{
       margin-top: 12px;
       border: 1px solid rgba(244, 239, 225, 0.12);
@@ -4112,6 +4985,48 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       padding: 4px 8px;
       font-size: 0.72rem;
       letter-spacing: 0.04em;
+    }}
+
+    .profile-text {{
+      color: #d6dce7;
+    }}
+
+    .related-sources {{
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(244, 239, 225, 0.08);
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.45;
+    }}
+
+    .related-sources strong {{
+      display: block;
+      margin-bottom: 5px;
+      color: var(--gold);
+      font-size: 0.68rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }}
+
+    .related-source-links {{
+      display: grid;
+      gap: 5px;
+    }}
+
+    .related-source-links a {{
+      color: #b9c5d6;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(86, 214, 201, 0.18);
+      overflow-wrap: anywhere;
+      transition: color 140ms ease, border-color 140ms ease;
+    }}
+
+    .related-source-links a:hover,
+    .related-source-links a:focus-visible {{
+      color: var(--teal);
+      border-bottom-color: rgba(86, 214, 201, 0.72);
+      outline: none;
     }}
 
     .classification-badge {{
@@ -4242,6 +5157,298 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       text-transform: uppercase;
     }}
 
+    .source-detail-dialog {{
+      width: min(1120px, calc(100vw - 32px));
+      max-height: min(860px, calc(100vh - 32px));
+      border: 1px solid rgba(214, 168, 79, 0.38);
+      background: rgba(9, 12, 17, 0.98);
+      color: var(--ink);
+      padding: 0;
+      overflow: hidden;
+      box-shadow: 0 34px 90px rgba(0, 0, 0, 0.62);
+    }}
+
+    .source-detail-dialog::backdrop {{
+      background:
+        linear-gradient(180deg, rgba(7, 8, 11, 0.56), rgba(7, 8, 11, 0.86)),
+        rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(6px);
+    }}
+
+    .source-dialog-shell {{
+      max-height: inherit;
+      overflow: auto;
+      scrollbar-gutter: stable;
+      scrollbar-color: rgba(214, 168, 79, 0.72) rgba(244, 239, 225, 0.08);
+      scrollbar-width: thin;
+    }}
+
+    .source-dialog-shell::-webkit-scrollbar {{
+      width: 12px;
+    }}
+
+    .source-dialog-shell::-webkit-scrollbar-track {{
+      background: rgba(244, 239, 225, 0.06);
+      border-left: 1px solid rgba(244, 239, 225, 0.1);
+    }}
+
+    .source-dialog-shell::-webkit-scrollbar-thumb {{
+      background: linear-gradient(180deg, rgba(214, 168, 79, 0.82), rgba(86, 214, 201, 0.54));
+      border: 3px solid rgba(9, 12, 17, 0.98);
+    }}
+
+    .source-dialog-shell::-webkit-scrollbar-thumb:hover {{
+      background: linear-gradient(180deg, rgba(238, 197, 106, 0.95), rgba(86, 214, 201, 0.72));
+    }}
+
+    .source-dialog-header {{
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: start;
+      padding: 22px 24px 18px;
+      border-bottom: 1px solid rgba(244, 239, 225, 0.12);
+      background: rgba(9, 12, 17, 0.96);
+      backdrop-filter: blur(14px);
+    }}
+
+    .source-dialog-kicker {{
+      color: var(--gold);
+      font-size: 0.68rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }}
+
+    .source-dialog-header h2 {{
+      margin: 7px 0 0;
+      font-size: clamp(1.35rem, 2.4vw, 2.25rem);
+      line-height: 1.08;
+      font-family: "Didot", "Baskerville", "Times New Roman", serif;
+      letter-spacing: 0;
+      overflow-wrap: anywhere;
+    }}
+
+    .source-dialog-subtitle {{
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.86rem;
+      overflow-wrap: anywhere;
+    }}
+
+    .source-dialog-close {{
+      appearance: none;
+      width: 38px;
+      height: 38px;
+      border: 1px solid rgba(244, 239, 225, 0.16);
+      background: rgba(244, 239, 225, 0.06);
+      color: var(--ink);
+      font: inherit;
+      font-size: 1.2rem;
+      line-height: 1;
+      cursor: pointer;
+    }}
+
+    .source-dialog-close:hover,
+    .source-dialog-close:focus-visible {{
+      outline: none;
+      border-color: rgba(86, 214, 201, 0.48);
+      background: rgba(86, 214, 201, 0.1);
+      color: var(--teal);
+    }}
+
+    .source-dialog-body {{
+      display: grid;
+      grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+      gap: 22px;
+      padding: 22px 24px 26px;
+    }}
+
+    .source-dialog-aside,
+    .source-dialog-main {{
+      min-width: 0;
+    }}
+
+    .source-dialog-aside {{
+      display: grid;
+      align-content: start;
+      gap: 14px;
+    }}
+
+    .source-dialog-figure {{
+      margin: 0;
+      border: 1px solid rgba(86, 214, 201, 0.18);
+      background: rgba(7, 8, 11, 0.48);
+    }}
+
+    .source-dialog-image {{
+      display: block;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: cover;
+      background: rgba(244, 239, 225, 0.05);
+    }}
+
+    .source-dialog-figure figcaption {{
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.45;
+    }}
+
+    .source-dialog-placeholder {{
+      min-height: 220px;
+      display: grid;
+      place-items: center;
+      padding: 22px;
+      border: 1px solid rgba(244, 239, 225, 0.1);
+      background:
+        linear-gradient(rgba(86, 214, 201, 0.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(214, 168, 79, 0.08) 1px, transparent 1px),
+        rgba(7, 8, 11, 0.48);
+      background-size: 18px 18px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 0.88rem;
+    }}
+
+    .source-dialog-link-list {{
+      display: grid;
+      gap: 8px;
+    }}
+
+    .source-dialog-link-list a,
+    .related-detail-item button {{
+      border: 1px solid rgba(244, 239, 225, 0.12);
+      background: rgba(244, 239, 225, 0.05);
+      color: var(--ink);
+      padding: 9px 11px;
+      text-decoration: none;
+      font: inherit;
+      font-size: 0.84rem;
+      line-height: 1.35;
+      text-align: left;
+      cursor: pointer;
+    }}
+
+    .source-dialog-link-list a:hover,
+    .source-dialog-link-list a:focus-visible,
+    .related-detail-item button:hover,
+    .related-detail-item button:focus-visible {{
+      outline: none;
+      border-color: rgba(86, 214, 201, 0.48);
+      color: var(--teal);
+      background: rgba(86, 214, 201, 0.08);
+    }}
+
+    .source-dialog-main {{
+      display: grid;
+      gap: 14px;
+    }}
+
+    .source-detail-section {{
+      border: 1px solid rgba(244, 239, 225, 0.1);
+      background: rgba(244, 239, 225, 0.035);
+      padding: 15px;
+    }}
+
+    .source-detail-section h3 {{
+      margin: 0 0 10px;
+      color: var(--gold);
+      font-size: 0.74rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }}
+
+    .source-detail-section p {{
+      margin: 0;
+      color: #d6dce7;
+      line-height: 1.62;
+    }}
+
+    .source-detail-section p + p {{
+      margin-top: 10px;
+    }}
+
+    .source-dialog-meta-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }}
+
+    .source-dialog-data-list {{
+      display: grid;
+      grid-template-columns: minmax(110px, 0.38fr) minmax(0, 1fr);
+      gap: 7px 12px;
+      margin: 0;
+    }}
+
+    .source-dialog-data-list div {{
+      display: contents;
+    }}
+
+    .source-dialog-data-list dt {{
+      color: var(--muted);
+      font-size: 0.73rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }}
+
+    .source-dialog-data-list dd {{
+      margin: 0;
+      color: #dde5ef;
+      overflow-wrap: anywhere;
+    }}
+
+    .source-dialog-chip-row {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }}
+
+    .source-dialog-chip {{
+      border: 1px solid rgba(86, 214, 201, 0.18);
+      background: rgba(86, 214, 201, 0.08);
+      color: #d6dce7;
+      padding: 5px 8px;
+      font-size: 0.75rem;
+    }}
+
+    .capability-detail-list,
+    .related-detail-list {{
+      display: grid;
+      gap: 9px;
+    }}
+
+    .capability-detail-item,
+    .related-detail-item {{
+      border-top: 1px solid rgba(244, 239, 225, 0.08);
+      padding-top: 9px;
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.5;
+    }}
+
+    .capability-detail-item:first-child,
+    .related-detail-item:first-child {{
+      border-top: 0;
+      padding-top: 0;
+    }}
+
+    .capability-detail-item strong,
+    .related-detail-item strong {{
+      display: block;
+      color: var(--ink);
+      font-size: 0.92rem;
+    }}
+
+    .related-detail-item button {{
+      width: 100%;
+      margin-bottom: 7px;
+    }}
+
     @media (max-width: 1120px) {{
       .hero {{
         grid-template-columns: 1fr;
@@ -4254,6 +5461,14 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       .span-8,
       .span-6,
       .span-4 {{ grid-column: span 12; }}
+
+      .source-dialog-body {{
+        grid-template-columns: 1fr;
+      }}
+
+      .source-dialog-aside {{
+        grid-template-columns: minmax(240px, 0.48fr) minmax(0, 1fr);
+      }}
     }}
 
     @media (max-width: 720px) {{
@@ -4346,6 +5561,28 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         font-size: 0.68rem;
         letter-spacing: 0.13em;
         text-transform: uppercase;
+      }}
+
+      .source-detail-dialog {{
+        width: calc(100vw - 18px);
+        max-height: calc(100vh - 18px);
+      }}
+
+      .source-dialog-header {{
+        padding: 18px 16px 15px;
+      }}
+
+      .source-dialog-body {{
+        padding: 16px;
+      }}
+
+      .source-dialog-aside,
+      .source-dialog-meta-grid {{
+        grid-template-columns: 1fr;
+      }}
+
+      .source-dialog-data-list {{
+        grid-template-columns: 1fr;
       }}
     }}
 
@@ -4517,6 +5754,8 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     </footer>
   </div>
 
+  <dialog class=\"source-detail-dialog\" id=\"sourceDetailDialog\" aria-labelledby=\"sourceDialogTitle\"></dialog>
+
   <script id=\"analysis-data\" type=\"application/json\">__DATA_JSON__</script>
   <script id=\"world-land-data\" type=\"application/json\">__WORLD_LAND_JSON__</script>
   <script>
@@ -4585,6 +5824,104 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         .replace(/\\b\\w/g, (letter) => letter.toUpperCase());
     }
 
+    function hasDetailValue(value) {
+      if (value === null || value === undefined) return false;
+      if (typeof value === 'string') return value.trim().length > 0;
+      if (Array.isArray(value)) return value.length > 0;
+      if (typeof value === 'object') return Object.keys(value).length > 0;
+      return true;
+    }
+
+    function humanizeToken(value) {
+      return String(value ?? '')
+        .replaceAll('_', ' ')
+        .replace(/\\s+/g, ' ')
+        .trim()
+        .replace(/\\b\\w/g, (letter) => letter.toUpperCase());
+    }
+
+    function formatDurationSeconds(value) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return '';
+      const rounded = Math.round(value);
+      const minutes = Math.floor(rounded / 60);
+      const seconds = rounded % 60;
+      if (minutes >= 60) {
+        const hours = Math.floor(minutes / 60);
+        const remainingMinutes = minutes % 60;
+        return `${hours} hr ${remainingMinutes} min`;
+      }
+      return minutes ? `${minutes} min ${seconds} sec` : `${seconds} sec`;
+    }
+
+    function formatDetailValue(value, key = '') {
+      if (Array.isArray(value)) {
+        return value.map((item) => formatDetailValue(item)).filter(Boolean).join(', ');
+      }
+      if (typeof value === 'boolean') {
+        return value ? 'Yes' : 'No';
+      }
+      if (typeof value === 'number') {
+        if (key === 'duration_seconds') return formatDurationSeconds(value);
+        if (key.endsWith('_bytes')) return `${value.toLocaleString()} bytes`;
+        return value.toLocaleString();
+      }
+      if (typeof value === 'object' && value) {
+        if (value.label) {
+          const coords = typeof value.latitude === 'number' && typeof value.longitude === 'number'
+            ? ` (${value.latitude.toFixed(3)}, ${value.longitude.toFixed(3)})`
+            : '';
+          return `${value.label}${coords}`;
+        }
+        return Object.entries(value)
+          .filter(([, nestedValue]) => hasDetailValue(nestedValue))
+          .map(([nestedKey, nestedValue]) => `${humanizeToken(nestedKey)}: ${formatDetailValue(nestedValue, nestedKey)}`)
+          .join(' · ');
+      }
+      const text = String(value ?? '').trim();
+      return text.includes('_') ? humanizeToken(text) : text;
+    }
+
+    function renderDetailRows(rows) {
+      const rendered = rows
+        .filter(([, value]) => hasDetailValue(value))
+        .map(([label, value, key]) => `
+          <div>
+            <dt>${escapeHtml(label)}</dt>
+            <dd>${escapeHtml(formatDetailValue(value, key))}</dd>
+          </div>`)
+        .join('');
+      return rendered ? `<dl class="source-dialog-data-list">${rendered}</dl>` : '';
+    }
+
+    function renderDetailSection(title, content) {
+      return content
+        ? `<section class="source-detail-section"><h3>${escapeHtml(title)}</h3>${content}</section>`
+        : '';
+    }
+
+    function renderChipRow(values) {
+      const chips = (values || [])
+        .filter(Boolean)
+        .map((value) => `<span class="source-dialog-chip">${escapeHtml(formatDetailValue(value))}</span>`)
+        .join('');
+      return chips ? `<div class="source-dialog-chip-row">${chips}</div>` : '';
+    }
+
+    function mediaProfileText(doc) {
+      if (doc.media_type === 'image') {
+        const meta = doc.media_metadata || {};
+        return meta.image_width && meta.image_height ? `${meta.image_width} x ${meta.image_height} image` : 'Image file';
+      }
+      if (doc.media_type === 'video' || doc.media_type === 'audio') {
+        const meta = doc.media_metadata || {};
+        const fallbackLabel = doc.media_type === 'audio' ? 'Audio file' : 'Video file';
+        const duration = typeof meta.duration_seconds === 'number' ? formatDurationSeconds(meta.duration_seconds) : fallbackLabel;
+        const dimensions = meta.video_width && meta.video_height ? `${meta.video_width} x ${meta.video_height}` : '';
+        return dimensions ? `${duration} · ${dimensions}` : duration;
+      }
+      return `${doc.page_count || 0} page${doc.page_count === 1 ? '' : 's'}`;
+    }
+
     function isVisualSource(doc) {
       if (doc.media_type === 'image' || doc.media_type === 'video') return true;
       if (doc.media_type === 'audio') return false;
@@ -4625,6 +5962,267 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       return `<div class="muted"><strong>Document:</strong> ${escapeHtml(description)}</div>`;
     }
 
+    let sourceDialogReturnFocus = null;
+
+    function sourceDialogLinks(doc) {
+      const links = [
+        ['Open source', sourceHref(doc)],
+        ['Original release file', doc.original_source_url],
+        ['Source page', doc.source_page_url],
+        ['Thumbnail image', doc.thumbnail_url],
+      ];
+      const seen = new Set();
+      const rendered = links
+        .filter(([, href]) => href && href !== '#' && !seen.has(href) && seen.add(href))
+        .map(([label, href]) => `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`)
+        .join('');
+      return rendered ? `<nav class="source-dialog-link-list" aria-label="Source links">${rendered}</nav>` : '';
+    }
+
+    function sourceDialogMedia(doc) {
+      if (!doc.thumbnail_url) {
+        return `<div class="source-dialog-placeholder">${escapeHtml(sourcePreviewLabel(doc))} unavailable</div>`;
+      }
+      const href = sourceHref(doc);
+      const image = `<img class="source-dialog-image" src="${escapeHtml(doc.thumbnail_url)}" alt="${escapeHtml(sourcePreviewLabel(doc))} for ${escapeHtml(doc.title)}">`;
+      return `
+        <figure class="source-dialog-figure">
+          ${href && href !== '#'
+            ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${image}</a>`
+            : image}
+          <figcaption>${escapeHtml(sourcePreviewLabel(doc))}</figcaption>
+        </figure>`;
+    }
+
+    function sourceDialogSummary(doc) {
+      const summary = doc.summary_narrative
+        ? `<p>${escapeHtml(doc.summary_narrative)}</p>`
+        : '<p class="muted">No summary narrative available.</p>';
+      return renderDetailSection('Summary', summary);
+    }
+
+    function sourceDialogObservationSection(doc) {
+      const paragraphs = [];
+      if (doc.visual_observations) {
+        paragraphs.push(`<p><strong>Visual:</strong> ${escapeHtml(doc.visual_observations)}</p>`);
+      }
+      if (doc.audio_transcript_summary || doc.audio_source_characterization) {
+        const source = doc.audio_source_characterization ? `${doc.audio_source_characterization}. ` : '';
+        const summary = doc.audio_transcript_summary || 'No usable audio transcript summary was generated for this source.';
+        paragraphs.push(`<p><strong>Audio:</strong> ${escapeHtml(source + summary)}</p>`);
+      }
+      if (doc.media_authenticity_notes) {
+        paragraphs.push(`<p><strong>Authenticity notes:</strong> ${escapeHtml(doc.media_authenticity_notes)}</p>`);
+      }
+      return renderDetailSection('Observations', paragraphs.join(''));
+    }
+
+    function sourceDialogOverviewRows(doc) {
+      return renderDetailRows([
+        ['Document type', doc.document_type],
+        ['Media type', doc.media_type || 'pdf'],
+        ['Date', doc.date_label || doc.year || doc.year_start || doc.year_end],
+        ['Location', doc.location],
+        ['Media profile', mediaProfileText(doc)],
+        ['Extraction', formatExtractionMethod(doc.extraction_method)],
+        ['Review status', doc.review_status],
+        ['Review source', doc.review_source],
+      ]);
+    }
+
+    function sourceDialogEvidenceRows(doc) {
+      return renderDetailRows([
+        ['Category', doc.evidence_category],
+        ['Category basis', doc.evidence_category_description],
+        ['Event count', doc.event_count],
+        ['Record type', doc.event_record_type],
+        ['Observation mode', doc.primary_observation_mode],
+        ['Sensor platform', doc.sensor_platform],
+        ['Observer platform', doc.observer_platform],
+        ['Observer roles', doc.observer_roles],
+        ['Witness count', doc.witness_count_bucket],
+        ['Corroboration', doc.corroboration_types],
+        ['Chain of custody', doc.chain_of_custody_quality],
+        ['Redaction level', doc.redaction_level],
+        ['Event time precision', doc.event_time_precision],
+        ['Location precision', doc.location_precision],
+        ['Environment context', doc.environment_context_present],
+        ['Day/night context', doc.day_night_context],
+        ['Object count', doc.object_count_bucket],
+        ['Morphology', doc.morphology_normalized],
+        ['Color/luminosity', doc.color_luminosity_normalized],
+        ['Motion', doc.apparent_motion_class],
+        ['Mundane explanation', doc.mundane_explanation_present],
+        ['Resolution', doc.resolution_status],
+        ['Measurement quality', doc.measurement_quality],
+        ['Quantitative fields', doc.quantitative_fields_present],
+      ]);
+    }
+
+    function sourceDialogTechnicalRows(doc) {
+      const mediaRows = Object.entries(doc.media_metadata || {})
+        .filter(([key, value]) => hasDetailValue(value) && key !== 'transcript_excerpt')
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, value]) => [humanizeToken(key), value, key]);
+      return renderDetailRows([
+        ['Filename', doc.filename],
+        ['Relative path', doc.relative_path],
+        ['Pages', doc.page_count],
+        ['Processed pages', doc.processed_pages],
+        ['Native pages', doc.native_pages],
+        ['OCR pages', doc.ocr_pages],
+        ['Deferred OCR pages', doc.ocr_skipped_pages],
+        ['Text characters', doc.text_characters],
+        ['Transcript characters', doc.transcript_characters],
+        ...mediaRows,
+      ]);
+    }
+
+    function sourceDialogCapabilities(doc) {
+      const capabilities = doc.capabilities || [];
+      if (capabilities.length) {
+        const rendered = capabilities.map((capability) => `
+          <div class="capability-detail-item">
+            <strong>${escapeHtml(capability.label || capability.key || 'Capability')}</strong>
+            <span>${escapeHtml([capability.group, capability.score ? `score ${capability.score}` : ''].filter(Boolean).join(' · '))}</span>
+            ${capability.description ? `<div>${escapeHtml(capability.description)}</div>` : ''}
+          </div>`).join('');
+        return renderDetailSection('Observed Capabilities', `<div class="capability-detail-list">${rendered}</div>`);
+      }
+      return doc.capability_profile && doc.capability_profile !== 'No capability label'
+        ? renderDetailSection('Observed Capabilities', `<p>${escapeHtml(doc.capability_profile)}</p>`)
+        : '';
+    }
+
+    function sourceDialogTags(doc) {
+      const sections = [
+        ['Themes', doc.themes],
+        ['Agencies', doc.agencies],
+      ].map(([label, values]) => {
+        const chips = renderChipRow(values);
+        return chips ? `<div><h3>${escapeHtml(label)}</h3>${chips}</div>` : '';
+      }).filter(Boolean).join('');
+      return sections ? `<section class="source-detail-section">${sections}</section>` : '';
+    }
+
+    function sourceDialogRelated(doc) {
+      const related = doc.related_sources || [];
+      if (!related.length) return '';
+      const rendered = related.map((source) => {
+        const score = typeof source.similarity === 'number' ? `${Math.round(source.similarity * 100)}% similar` : '';
+        const factors = (source.shared_factors || []).join(' · ');
+        const filterValue = source.title || source.filename || '';
+        return `
+          <div class="related-detail-item">
+            <button type="button" data-dialog-related-search="${escapeHtml(filterValue)}">
+              <strong>${escapeHtml(source.title || source.filename || 'Related source')}</strong>
+              ${escapeHtml([source.document_type, source.year, source.evidence_category, score].filter(Boolean).join(' · '))}
+            </button>
+            ${factors ? `<div>${escapeHtml(factors)}</div>` : ''}
+          </div>`;
+      }).join('');
+      return renderDetailSection('Similar Sources', `<div class="related-detail-list">${rendered}</div>`);
+    }
+
+    function renderSourceDialog(doc) {
+      const categoryClass = doc.evidence_category_rank === 1
+        ? 'category-one'
+        : doc.evidence_category_rank === 2
+          ? 'category-two'
+          : 'category-three';
+      const overview = sourceDialogOverviewRows(doc);
+      const evidence = sourceDialogEvidenceRows(doc);
+      const technical = sourceDialogTechnicalRows(doc);
+      return `
+        <div class="source-dialog-shell">
+          <header class="source-dialog-header">
+            <div>
+              <div class="source-dialog-kicker">Source Detail</div>
+              <h2 id="sourceDialogTitle">${escapeHtml(doc.title)}</h2>
+              <div class="source-dialog-subtitle">${escapeHtml(doc.filename || doc.relative_path || '')}</div>
+            </div>
+            <form method="dialog">
+              <button class="source-dialog-close" type="submit" aria-label="Close source detail">&times;</button>
+            </form>
+          </header>
+          <div class="source-dialog-body">
+            <aside class="source-dialog-aside">
+              ${sourceDialogMedia(doc)}
+              ${sourceDialogLinks(doc)}
+              <span class="classification-badge ${categoryClass}">${escapeHtml(doc.evidence_category || 'Category Three')}</span>
+            </aside>
+            <main class="source-dialog-main">
+              ${sourceDialogSummary(doc)}
+              ${sourceDialogObservationSection(doc)}
+              ${overview ? renderDetailSection('Source Metadata', `<div class="source-dialog-meta-grid">${overview}</div>`) : ''}
+              ${sourceDialogTags(doc)}
+              ${sourceDialogCapabilities(doc)}
+              ${evidence ? renderDetailSection('Evidence Signals', evidence) : ''}
+              ${technical ? renderDetailSection('Technical Metadata', technical) : ''}
+              ${sourceDialogRelated(doc)}
+            </main>
+          </div>
+        </div>`;
+    }
+
+    function openSourceDialog(doc, trigger = null) {
+      const dialog = document.getElementById('sourceDetailDialog');
+      if (!dialog || !doc) return;
+      sourceDialogReturnFocus = trigger || document.activeElement;
+      dialog.innerHTML = renderSourceDialog(doc);
+      dialog.querySelectorAll('[data-dialog-related-search]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const search = button.dataset.dialogRelatedSearch;
+          dialog.close();
+          if (search) openDocumentsWithFilters({ search });
+        });
+      });
+      if (typeof dialog.showModal === 'function') {
+        dialog.showModal();
+      } else {
+        dialog.setAttribute('open', '');
+      }
+    }
+
+    function bindSourceDetailButtons() {
+      document.querySelectorAll('[data-source-index]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const sourceIndex = Number(button.dataset.sourceIndex);
+          if (!Number.isInteger(sourceIndex) || sourceIndex < 0) return;
+          openSourceDialog(documents[sourceIndex], button);
+        });
+      });
+    }
+
+    function initSourceDialog() {
+      const dialog = document.getElementById('sourceDetailDialog');
+      if (!dialog) return;
+      dialog.addEventListener('click', (event) => {
+        if (event.target === dialog) {
+          dialog.close();
+        }
+      });
+      dialog.addEventListener('close', () => {
+        if (sourceDialogReturnFocus && typeof sourceDialogReturnFocus.focus === 'function') {
+          sourceDialogReturnFocus.focus();
+        }
+        sourceDialogReturnFocus = null;
+      });
+    }
+
+    function relatedSourcesSection(doc) {
+      const related = (doc.related_sources || []).slice(0, 3);
+      if (!related.length) return '';
+      const links = related.map((source) => {
+        const factors = (source.shared_factors || []).slice(0, 3).join(' · ');
+        const score = typeof source.similarity === 'number' ? ` ${Math.round(source.similarity * 100)}%` : '';
+        const title = factors ? `${source.title} · ${factors}` : source.title;
+        const filterValue = source.title || source.filename || '';
+        return `<a href="${escapeHtml(source.source_href || '#')}" data-related-search="${escapeHtml(filterValue)}" title="${escapeHtml(title)}">${escapeHtml(source.title || source.filename || 'Related source')}${escapeHtml(score)}</a>`;
+      }).join('');
+      return `<div class="related-sources"><strong>Similar</strong><div class="related-source-links">${links}</div></div>`;
+    }
+
     function resetDocumentPage() {
       state.page = 1;
     }
@@ -4643,6 +6241,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         if (!search) return true;
         const haystack = [
           doc.title,
+          doc.filename || '',
           doc.summary_narrative,
           doc.visual_observations || '',
           doc.audio_source_characterization || '',
@@ -5092,20 +6691,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           .filter(Boolean)
           .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
           .join('');
-        const mediaProfile = doc.media_type === 'image'
-          ? (() => {
-              const meta = doc.media_metadata || {};
-              return meta.image_width && meta.image_height ? `${meta.image_width} x ${meta.image_height} image` : 'Image file';
-            })()
-          : doc.media_type === 'video' || doc.media_type === 'audio'
-            ? (() => {
-                const meta = doc.media_metadata || {};
-                const fallbackLabel = doc.media_type === 'audio' ? 'Audio file' : 'Video file';
-                const duration = typeof meta.duration_seconds === 'number' ? `${Math.round(meta.duration_seconds)} sec` : fallbackLabel;
-                const dimensions = meta.video_width && meta.video_height ? `${meta.video_width} x ${meta.video_height}` : '';
-                return dimensions ? `${duration} · ${dimensions}` : duration;
-              })()
-            : `${doc.page_count} pages`;
+        const mediaProfile = mediaProfileText(doc);
         const profile = [
           doc.date_label || (doc.year ? `${doc.year}` : 'Undated'),
           doc.location ? doc.location.label : 'No location resolved',
@@ -5116,7 +6702,9 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           doc.review_status === 'reviewed' ? 'Reviewed narrative' : '',
         ].filter(Boolean).join(' · ');
         const sourceContext = sourceContextSection(doc);
+        const relatedSources = relatedSourcesSection(doc);
         const href = sourceHref(doc);
+        const sourceIndex = documents.indexOf(doc);
         const previewPanel = doc.thumbnail_url
           ? `<details class="source-preview">
               <summary>${escapeHtml(sourcePreviewLabel(doc))}</summary>
@@ -5129,7 +6717,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         return `
           <tr>
             <td data-label="Source">
-              <p class="doc-title"><a href="${escapeHtml(href)}">${escapeHtml(doc.title)}</a></p>
+              <p class="doc-title"><button class="source-title-button" type="button" data-source-index="${sourceIndex}" aria-haspopup="dialog">${escapeHtml(doc.title)}</button></p>
               ${previewPanel}
               <div class="tag-row">${tags}</div>
             </td>
@@ -5137,7 +6725,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
               <span class="classification-badge ${categoryClass}">${escapeHtml(doc.evidence_category || 'Category Three')}</span>
               <div class="muted">${escapeHtml(doc.evidence_category_description || '')}</div>
             </td>
-            <td data-label="Profile">${escapeHtml(profile)}</td>
+            <td data-label="Profile"><div class="profile-text">${escapeHtml(profile)}</div>${relatedSources}</td>
             <td data-label="Summary Narrative">${escapeHtml(doc.summary_narrative || 'No summary narrative available.')}${sourceContext}</td>
           </tr>`;
       }).join('');
@@ -5147,7 +6735,22 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       document.getElementById('documentCount').textContent = `${totalItems} sources in register`;
       document.getElementById('paginationSummary').textContent = paginationSummary;
       document.getElementById('documentRows').innerHTML = rows || '<tr><td colspan="4">No sources match the current filters.</td></tr>';
+      bindSourceDetailButtons();
+      bindRelatedSourceLinks();
       renderPaginationControls(totalItems, totalPages);
+    }
+
+    function bindRelatedSourceLinks() {
+      document.querySelectorAll('[data-related-search]').forEach((link) => {
+        link.addEventListener('click', (event) => {
+          const search = link.dataset.relatedSearch;
+          if (!search) {
+            return;
+          }
+          event.preventDefault();
+          openDocumentsWithFilters({ search });
+        });
+      });
     }
 
     function renderPaginationControls(totalItems, totalPages) {
@@ -5316,6 +6919,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     renderMeta();
     initTabs();
     initFilters();
+    initSourceDialog();
     updateDashboard();
   </script>
 </body>
@@ -5507,7 +7111,7 @@ def main() -> int:
             )
             if cached_payload is not None and args.review_mode == "hybrid":
               cached_review = cached_payload.get("applied_review")
-              if not review_has_evidence_category(current_review or cached_review):
+              if not review_has_required_fields(current_review or cached_review):
                 cached_payload = None
 
         if cached_payload is not None:
@@ -5598,7 +7202,29 @@ def main() -> int:
             write_review_overrides(args.review_file, review_overrides)
             review_file_updates += 1
 
-    analysis = build_analysis(documents, source_dir, executive_summary=executive_summary)
+    related_source_stats: dict[str, object] = {"enabled": False, "reason": "disabled"}
+    if args.related_sources_mode == "auto":
+        embedding_client = EmbeddingClient(
+            base_url=args.embedding_base_url or args.review_base_url,
+            model_name=args.embedding_model,
+            timeout_seconds=args.embedding_timeout,
+            api_key=args.embedding_api_key if args.embedding_api_key is not None else args.review_api_key,
+        )
+        documents, related_source_stats = attach_related_sources(
+            documents=documents,
+            embedding_client=embedding_client,
+            cache_path=args.embedding_cache,
+            refresh_embeddings=args.refresh_embeddings,
+            related_limit=args.related_sources_limit,
+            min_score=args.related_sources_min_score,
+        )
+
+    analysis = build_analysis(
+        documents,
+        source_dir,
+        executive_summary=executive_summary,
+        related_source_stats=related_source_stats,
+    )
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_html.parent.mkdir(parents=True, exist_ok=True)
     if args.review_mode == "hybrid" and review_overrides:
@@ -5613,6 +7239,14 @@ def main() -> int:
     print(f"Processed {analyzed_documents} document analyses this run")
     print(f"Included {media_documents} media source items")
     print(f"Skipped {skipped_duplicate_paths} duplicate source files based on original source URL")
+    if related_source_stats.get("enabled"):
+        print(
+            "Attached related sources to "
+            f"{related_source_stats.get('documents_with_related_sources', 0)} documents "
+            f"using {related_source_stats.get('model')}"
+        )
+    elif args.related_sources_mode == "auto":
+        print(f"Related source generation skipped: {related_source_stats.get('reason', 'unknown')}")
     print(f"Updated review cache {review_file_updates} times")
     print(f"Wrote JSON to {args.output_json}")
     print(f"Wrote dashboard to {args.output_html}")
