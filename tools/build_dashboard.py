@@ -6823,7 +6823,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       }
       const width = Math.max(node.clientWidth || 420, 420);
       const rowLabelWidth = Math.min(Math.max(...rows.map((row) => row.label.length * 6.5), 128), Math.max(width * 0.36, 132));
-      const columnHeight = 72;
+      const columnHeight = options.columnHeight || 72;
       const cellSize = Math.max(30, Math.min(48, (width - rowLabelWidth - 20) / columns.length));
       const left = rowLabelWidth;
       const top = columnHeight;
@@ -6832,7 +6832,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       const maxCount = Math.max(...values, 1);
       const columnLabels = columns.map((column, index) => {
         const x = left + index * cellSize + cellSize / 2;
-        return `<text x="${x}" y="${top - 10}" transform="rotate(-38 ${x} ${top - 10})" text-anchor="start" font-size="10" fill="${chartColors.muted}">${escapeHtml(column.label)}</text>`;
+        return `<text x="${x}" y="${top - 14}" transform="rotate(-38 ${x} ${top - 14})" text-anchor="start" dominant-baseline="central" font-size="10" fill="${chartColors.muted}">${escapeHtml(column.label)}</text>`;
       }).join('');
       const rowLabels = rows.map((row, index) => {
         const y = top + index * cellSize + cellSize / 2 + 4;
@@ -6894,6 +6894,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         items.filter((doc) => trendValues(doc, 'morphology_normalized').includes(row.key) && trendValues(doc, 'apparent_motion_class').includes(column.key)).length
       ), {
         color: chartColors.teal,
+        columnHeight: 124,
         emptyText: 'No morphology/motion overlap is available.',
         cellAttributes: (row) => `data-search="${escapeHtml(row.key)}"`,
       });
