@@ -4306,7 +4306,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     h1 {{
       max-width: 900px;
       margin: 0;
-      font-size: clamp(3rem, 7vw, 7.4rem);
+      font-size: clamp(2.25rem, 5.25vw, 5.55rem);
       line-height: 0.88;
       font-family: "Didot", "Baskerville", "Times New Roman", serif;
       font-weight: 700;
@@ -5517,7 +5517,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       }}
 
       h1 {{
-        font-size: 3.55rem;
+        font-size: 2.66rem;
         line-height: 0.92;
       }}
 
@@ -5622,7 +5622,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
 
     @media (max-width: 500px) {{
       h1 {{
-        font-size: 3rem;
+        font-size: 2.25rem;
       }}
 
       .hero-meta {{
