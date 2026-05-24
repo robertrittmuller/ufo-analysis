@@ -4724,6 +4724,10 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       color: var(--ink);
     }}
 
+    .svg-wrap svg text {{
+      pointer-events: none;
+    }}
+
     .chart-note,
     .muted {{ color: var(--muted); }}
 
@@ -5071,6 +5075,30 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       line-height: 1.58;
     }}
 
+    .chart-legend {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }}
+
+    .chart-legend span {{
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }}
+
+    .chart-legend i {{
+      width: 10px;
+      height: 10px;
+      display: inline-block;
+      border: 1px solid rgba(244, 239, 225, 0.18);
+    }}
+
     .chart-click-target {{
       cursor: pointer;
     }}
@@ -5102,6 +5130,12 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     .chart-click-target:focus-visible circle {{
       stroke: rgba(244, 239, 225, 0.88);
       stroke-width: 2.2;
+    }}
+
+    .chart-click-target:hover path,
+    .chart-click-target:focus-visible path {{
+      stroke: rgba(244, 239, 225, 0.82);
+      stroke-width: 1.4;
     }}
 
     .chart-click-target:focus-visible {{
@@ -5641,14 +5675,9 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           <div id=\"metrics\" class=\"metrics\"></div>
         </section>
 
-        <section class=\"panel span-12\">
-          <h2>Executive Summary</h2>
-          <div id=\"executiveSummary\" class=\"executive-summary\"></div>
-        </section>
-
         <section class=\"panel span-8\">
-          <h2>Source Timeline</h2>
-          <div id=\"timelineChart\" class=\"svg-wrap\"></div>
+          <h2>Evidence Over Time</h2>
+          <div id=\"evidenceTimelineChart\" class=\"svg-wrap\"></div>
         </section>
 
         <section class=\"panel span-4\">
@@ -5682,9 +5711,39 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           <div id=\"organizationChart\" class=\"svg-wrap\"></div>
         </section>
 
+        <section class=\"panel span-4\">
+          <h2>Resolution Status</h2>
+          <div id=\"resolutionChart\" class=\"svg-wrap\"></div>
+        </section>
+
+        <section class=\"panel span-4\">
+          <h2>Observation Mode Matrix</h2>
+          <div id=\"observationModeMatrix\" class=\"svg-wrap\"></div>
+        </section>
+
+        <section class=\"panel span-4\">
+          <h2>Corroboration vs Category</h2>
+          <div id=\"corroborationCategoryMatrix\" class=\"svg-wrap\"></div>
+        </section>
+
+        <section class=\"panel span-6\">
+          <h2>Phenomenology Matrix</h2>
+          <div id=\"phenomenologyMatrix\" class=\"svg-wrap\"></div>
+        </section>
+
+        <section class=\"panel span-6\">
+          <h2>Related Source Network</h2>
+          <div id=\"relatedSourceNetwork\" class=\"svg-wrap\"></div>
+        </section>
+
         <section class=\"panel span-12\">
           <h2>Recurring Themes</h2>
           <div id=\"themeGrid\" class=\"theme-grid\"></div>
+        </section>
+
+        <section class=\"panel span-12\">
+          <h2>Executive Summary</h2>
+          <div id=\"executiveSummary\" class=\"executive-summary\"></div>
         </section>
       </div>
     </section>
@@ -5788,6 +5847,33 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       land: 'rgba(214,168,79,0.16)',
       mapPanel: 'rgba(6,13,17,0.72)',
     };
+    const categoryPalette = {
+      'Category One': chartColors.red,
+      'Category Two': chartColors.gold,
+      'Category Three': chartColors.teal,
+    };
+    const trendFields = [
+      'event_record_type',
+      'primary_observation_mode',
+      'sensor_platform',
+      'observer_platform',
+      'observer_roles',
+      'witness_count_bucket',
+      'corroboration_types',
+      'chain_of_custody_quality',
+      'redaction_level',
+      'event_time_precision',
+      'location_precision',
+      'day_night_context',
+      'object_count_bucket',
+      'morphology_normalized',
+      'color_luminosity_normalized',
+      'apparent_motion_class',
+      'mundane_explanation_present',
+      'resolution_status',
+      'measurement_quality',
+      'quantitative_fields_present',
+    ];
 
     function escapeHtml(value) {
       return String(value ?? '')
@@ -5805,6 +5891,35 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         counts.set(key, (counts.get(key) || 0) + 1);
       });
       return [...counts.entries()].map(([label, count]) => ({ label, count }));
+    }
+
+    function trendValues(doc, field) {
+      const value = doc[field];
+      if (Array.isArray(value)) return value.filter(Boolean);
+      return value === null || value === undefined || value === '' ? [] : [value];
+    }
+
+    function trendSearchValues(doc) {
+      return trendFields.flatMap((field) => trendValues(doc, field)).flatMap((value) => [value, humanizeToken(value)]);
+    }
+
+    function countTrendValues(items, field, options = {}) {
+      const excluded = new Set(options.exclude || []);
+      const counts = new Map();
+      items.forEach((doc) => {
+        trendValues(doc, field).forEach((value) => {
+          if (excluded.has(value)) return;
+          counts.set(value, (counts.get(value) || 0) + 1);
+        });
+      });
+      return [...counts.entries()]
+        .map(([key, count]) => ({ key, label: humanizeToken(key), count }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    }
+
+    function chartLegend(entries) {
+      return `<div class="chart-legend">${entries.map((entry) => `
+        <span><i style="background:${escapeHtml(entry.color)}"></i>${escapeHtml(entry.label)}</span>`).join('')}</div>`;
     }
 
     function sourceHref(doc) {
@@ -6253,6 +6368,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           doc.evidence_category_description || '',
           doc.capability_profile || '',
           ...(doc.capability_labels || []),
+          ...trendSearchValues(doc),
           doc.location ? doc.location.label : '',
         ].join(' ').toLowerCase();
         return haystack.includes(search);
@@ -6583,6 +6699,295 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       });
     }
 
+    function renderEvidenceTimeline(items) {
+      const node = document.getElementById('evidenceTimelineChart');
+      const categories = (analysis.evidence_category_counts || []).slice().sort((a, b) => a.rank - b.rank);
+      const years = [...new Set(items.map((doc) => doc.year).filter(Boolean))].sort((a, b) => a - b);
+      if (!years.length || !categories.length) {
+        node.innerHTML = '<p class="chart-note">No dated evidence records are available.</p>';
+        return;
+      }
+
+      const width = Math.max(node.clientWidth || 520, 520);
+      const height = 330;
+      const margin = { top: 18, right: 20, bottom: 64, left: 44 };
+      const plotWidth = width - margin.left - margin.right;
+      const plotHeight = height - margin.top - margin.bottom;
+      const rows = years.map((year) => {
+        const docsForYear = items.filter((doc) => doc.year === year);
+        const categoryCounts = categories.map((category) => ({
+          ...category,
+          count: docsForYear.filter((doc) => doc.evidence_category === category.label).length,
+        }));
+        return { year, total: categoryCounts.reduce((sum, category) => sum + category.count, 0), categoryCounts };
+      });
+      const maxTotal = Math.max(...rows.map((row) => row.total), 1);
+      const barStep = plotWidth / rows.length;
+      const labelStep = Math.max(1, Math.ceil(rows.length / 12));
+      const grid = Array.from({ length: 5 }, (_, index) => {
+        const value = Math.round((maxTotal / 4) * index);
+        const y = margin.top + plotHeight - (plotHeight * index / 4);
+        return `
+          <line x1="${margin.left}" x2="${width - margin.right}" y1="${y}" y2="${y}" stroke="${chartColors.grid}"></line>
+          <text x="${margin.left - 10}" y="${y + 4}" text-anchor="end" font-size="11" fill="${chartColors.muted}">${value}</text>`;
+      }).join('');
+      const bars = rows.map((row, index) => {
+        let yCursor = margin.top + plotHeight;
+        const x = margin.left + index * barStep + 3;
+        const barWidth = Math.max(barStep - 6, 3);
+        const segments = row.categoryCounts.map((category) => {
+          const segmentHeight = (category.count / maxTotal) * plotHeight;
+          yCursor -= segmentHeight;
+          if (!category.count) return '';
+          const title = `${category.label}, ${row.year}: ${category.count}`;
+          return `
+            <g class="chart-click-target" data-year="${row.year}" data-category="${escapeHtml(category.label)}" role="button" tabindex="0" aria-label="Filter documents to ${escapeHtml(title)}">
+              <rect x="${x}" y="${yCursor}" width="${barWidth}" height="${Math.max(segmentHeight, 1)}" fill="${categoryPalette[category.label] || chartColors.blue}" opacity="0.84">
+                <title>${escapeHtml(title)}</title>
+              </rect>
+            </g>`;
+        }).join('');
+        const label = index % labelStep === 0 || index === rows.length - 1
+          ? `<text x="${x + barWidth / 2}" y="${margin.top + plotHeight + 34}" transform="rotate(-45 ${x + barWidth / 2} ${margin.top + plotHeight + 34})" text-anchor="end" font-size="10" fill="${chartColors.muted}">${row.year}</text>`
+          : '';
+        return `${segments}${label}`;
+      }).join('');
+
+      node.innerHTML = `
+        <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img">
+          ${grid}
+          ${bars}
+        </svg>
+        ${chartLegend(categories.map((category) => ({ label: category.label, color: categoryPalette[category.label] || chartColors.blue })))}`;
+      bindChartFilterTargets('#evidenceTimelineChart [data-year]', (element) => {
+        const year = Number(element.dataset.year);
+        if (Number.isFinite(year)) {
+          openDocumentsWithFilters({ yearMin: year, yearMax: year, category: element.dataset.category || 'all' });
+        }
+      });
+    }
+
+    function renderResolutionChart(items) {
+      const node = document.getElementById('resolutionChart');
+      const statuses = countTrendValues(items, 'resolution_status').slice(0, 8);
+      if (!statuses.length) {
+        node.innerHTML = '<p class="chart-note">No resolution labels are available.</p>';
+        return;
+      }
+
+      const explanationValues = ['no', 'yes_source_suggested', 'yes_source_resolved', 'unclear'];
+      const explanationColors = {
+        no: chartColors.red,
+        yes_source_suggested: chartColors.gold,
+        yes_source_resolved: chartColors.green,
+        unclear: chartColors.teal,
+      };
+      const width = Math.max(node.clientWidth || 320, 320);
+      const height = Math.max(statuses.length * 46 + 42, 280);
+      const margin = { top: 8, right: 34, bottom: 24, left: Math.min(Math.max(...statuses.map((entry) => entry.label.length * 6.2), 120), Math.max(width * 0.46, 130)) };
+      const plotWidth = width - margin.left - margin.right;
+      const maxCount = Math.max(...statuses.map((entry) => entry.count), 1);
+      const rows = statuses.map((status, index) => {
+        const y = margin.top + index * 42 + 8;
+        let xCursor = margin.left;
+        const segments = explanationValues.map((explanation) => {
+          const count = items.filter((doc) => doc.resolution_status === status.key && doc.mundane_explanation_present === explanation).length;
+          if (!count) return '';
+          const widthForCount = (count / maxCount) * plotWidth;
+          const x = xCursor;
+          xCursor += widthForCount;
+          const title = `${status.label} · ${humanizeToken(explanation)}: ${count}`;
+          return `
+            <g class="chart-click-target" data-search="${escapeHtml(status.key)}" role="button" tabindex="0" aria-label="Search documents for ${escapeHtml(status.label)}">
+              <rect x="${x}" y="${y}" width="${Math.max(widthForCount, 1)}" height="22" fill="${explanationColors[explanation]}" opacity="0.78">
+                <title>${escapeHtml(title)}</title>
+              </rect>
+            </g>`;
+        }).join('');
+        return `
+          <text x="${margin.left - 12}" y="${y + 15}" text-anchor="end" font-size="12" fill="${chartColors.muted}">${escapeHtml(status.label)}</text>
+          ${segments}
+          <text x="${margin.left + (status.count / maxCount) * plotWidth + 8}" y="${y + 15}" font-size="12" fill="${chartColors.ink}">${status.count}</text>`;
+      }).join('');
+      node.innerHTML = `
+        <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img">${rows}</svg>
+        ${chartLegend(explanationValues.map((value) => ({ label: humanizeToken(value), color: explanationColors[value] })))}`;
+      bindChartFilterTargets('#resolutionChart [data-search]', (element) => openDocumentsWithFilters({ search: element.dataset.search }));
+    }
+
+    function renderHeatmap(targetId, rows, columns, countFn, options = {}) {
+      const node = document.getElementById(targetId);
+      if (!rows.length || !columns.length) {
+        node.innerHTML = `<p class="chart-note">${escapeHtml(options.emptyText || 'No matrix data is available.')}</p>`;
+        return;
+      }
+      const width = Math.max(node.clientWidth || 420, 420);
+      const rowLabelWidth = Math.min(Math.max(...rows.map((row) => row.label.length * 6.5), 128), Math.max(width * 0.36, 132));
+      const columnHeight = 72;
+      const cellSize = Math.max(30, Math.min(48, (width - rowLabelWidth - 20) / columns.length));
+      const left = rowLabelWidth;
+      const top = columnHeight;
+      const height = top + rows.length * cellSize + 22;
+      const values = rows.flatMap((row) => columns.map((column) => countFn(row, column)));
+      const maxCount = Math.max(...values, 1);
+      const columnLabels = columns.map((column, index) => {
+        const x = left + index * cellSize + cellSize / 2;
+        return `<text x="${x}" y="${top - 10}" transform="rotate(-38 ${x} ${top - 10})" text-anchor="start" font-size="10" fill="${chartColors.muted}">${escapeHtml(column.label)}</text>`;
+      }).join('');
+      const rowLabels = rows.map((row, index) => {
+        const y = top + index * cellSize + cellSize / 2 + 4;
+        return `<text x="${left - 10}" y="${y}" text-anchor="end" font-size="11" fill="${chartColors.muted}">${escapeHtml(row.label)}</text>`;
+      }).join('');
+      const cells = rows.map((row, rowIndex) => columns.map((column, columnIndex) => {
+        const count = countFn(row, column);
+        const x = left + columnIndex * cellSize;
+        const y = top + rowIndex * cellSize;
+        const intensity = count ? Math.min(0.9, 0.18 + (count / maxCount) * 0.72) : 0.05;
+        const title = `${row.label} · ${column.label}: ${count}`;
+        const dataAttributes = options.cellAttributes ? options.cellAttributes(row, column, count) : `data-search="${escapeHtml(row.key)}"`;
+        return `
+          <g class="chart-click-target" ${dataAttributes} role="button" tabindex="0" aria-label="${escapeHtml(title)}">
+            <rect x="${x}" y="${y}" width="${cellSize - 3}" height="${cellSize - 3}" fill="${options.color || chartColors.teal}" opacity="${intensity.toFixed(2)}" stroke="rgba(244,239,225,0.08)">
+              <title>${escapeHtml(title)}</title>
+            </rect>
+            ${count ? `<text x="${x + (cellSize - 3) / 2}" y="${y + cellSize / 2 + 4}" text-anchor="middle" font-size="11" fill="${chartColors.ink}">${count}</text>` : ''}
+          </g>`;
+      }).join('')).join('');
+      node.innerHTML = `
+        <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img">
+          ${columnLabels}
+          ${rowLabels}
+          ${cells}
+        </svg>`;
+      bindChartFilterTargets(`#${targetId} [data-search]:not([data-category])`, (element) => openDocumentsWithFilters({ search: element.dataset.search }));
+      bindChartFilterTargets(`#${targetId} [data-category]`, (element) => openDocumentsWithFilters({ category: element.dataset.category, search: element.dataset.search || '' }));
+    }
+
+    function renderObservationModeMatrix(items) {
+      const rows = countTrendValues(items, 'primary_observation_mode', { exclude: ['unknown', 'none_stated'] }).slice(0, 8);
+      const columns = countTrendValues(items, 'observer_platform', { exclude: ['unknown', 'not_applicable'] }).slice(0, 7);
+      renderHeatmap('observationModeMatrix', rows, columns, (row, column) => (
+        items.filter((doc) => trendValues(doc, 'primary_observation_mode').includes(row.key) && trendValues(doc, 'observer_platform').includes(column.key)).length
+      ), {
+        color: chartColors.blue,
+        emptyText: 'No observation mode/platform overlap is available.',
+        cellAttributes: (row) => `data-search="${escapeHtml(row.key)}"`,
+      });
+    }
+
+    function renderCorroborationCategoryMatrix(items) {
+      const rows = countTrendValues(items, 'corroboration_types').slice(0, 8);
+      const columns = (analysis.evidence_category_counts || []).slice().sort((a, b) => a.rank - b.rank).map((category) => ({ key: category.label, label: category.label.replace('Category ', 'C') }));
+      renderHeatmap('corroborationCategoryMatrix', rows, columns, (row, column) => (
+        items.filter((doc) => doc.evidence_category === column.key && trendValues(doc, 'corroboration_types').includes(row.key)).length
+      ), {
+        color: chartColors.gold,
+        emptyText: 'No corroboration/category overlap is available.',
+        cellAttributes: (row, column) => `data-search="${escapeHtml(row.key)}" data-category="${escapeHtml(column.key)}"`,
+      });
+    }
+
+    function renderPhenomenologyMatrix(items) {
+      const rows = countTrendValues(items, 'morphology_normalized', { exclude: ['none_stated', 'unknown'] }).slice(0, 8);
+      const columns = countTrendValues(items, 'apparent_motion_class', { exclude: ['unknown'] }).slice(0, 8);
+      renderHeatmap('phenomenologyMatrix', rows, columns, (row, column) => (
+        items.filter((doc) => trendValues(doc, 'morphology_normalized').includes(row.key) && trendValues(doc, 'apparent_motion_class').includes(column.key)).length
+      ), {
+        color: chartColors.teal,
+        emptyText: 'No morphology/motion overlap is available.',
+        cellAttributes: (row) => `data-search="${escapeHtml(row.key)}"`,
+      });
+    }
+
+    function renderRelatedSourceNetwork(items) {
+      const node = document.getElementById('relatedSourceNetwork');
+      const byKey = new Map();
+      items.forEach((doc) => {
+        [doc.title, doc.filename].filter(Boolean).forEach((key) => byKey.set(key, doc));
+      });
+      const degree = new Map();
+      const edgeMap = new Map();
+      items.forEach((doc) => {
+        const sourceKey = doc.title || doc.filename;
+        if (!sourceKey) return;
+        (doc.related_sources || []).forEach((related) => {
+          const target = byKey.get(related.title) || byKey.get(related.filename);
+          if (!target) return;
+          const targetKey = target.title || target.filename;
+          if (!targetKey || targetKey === sourceKey) return;
+          const pair = [sourceKey, targetKey].sort().join('::');
+          const similarity = typeof related.similarity === 'number' ? related.similarity : 0;
+          const previous = edgeMap.get(pair);
+          if (!previous || similarity > previous.similarity) {
+            edgeMap.set(pair, { sourceKey, targetKey, similarity });
+          }
+          degree.set(sourceKey, (degree.get(sourceKey) || 0) + 1);
+          degree.set(targetKey, (degree.get(targetKey) || 0) + 1);
+        });
+      });
+      const nodeDocs = items
+        .filter((doc) => degree.get(doc.title || doc.filename))
+        .sort((a, b) => (degree.get(b.title || b.filename) || 0) - (degree.get(a.title || a.filename) || 0) || (a.evidence_category_rank || 9) - (b.evidence_category_rank || 9))
+        .slice(0, 34);
+      if (!nodeDocs.length) {
+        node.innerHTML = '<p class="chart-note">No related-source links are available.</p>';
+        return;
+      }
+      const selected = new Set(nodeDocs.map((doc) => doc.title || doc.filename));
+      const edges = [...edgeMap.values()]
+        .filter((edge) => selected.has(edge.sourceKey) && selected.has(edge.targetKey))
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, 90);
+      const width = Math.max(node.clientWidth || 420, 420);
+      const height = 380;
+      const centerX = width / 2;
+      const centerY = height / 2;
+      const maxRadius = Math.min(width, height) * 0.42;
+      const minRadius = Math.min(width, height) * 0.19;
+      const maxDegree = Math.max(...nodeDocs.map((doc) => degree.get(doc.title || doc.filename) || 1), 1);
+      const positions = new Map();
+      nodeDocs.forEach((doc, index) => {
+        const rank = doc.evidence_category_rank || 3;
+        const radius = minRadius + ((rank - 1) / 2) * (maxRadius - minRadius);
+        const angle = -Math.PI / 2 + (index / nodeDocs.length) * Math.PI * 2;
+        positions.set(doc.title || doc.filename, {
+          x: centerX + Math.cos(angle) * radius,
+          y: centerY + Math.sin(angle) * radius,
+        });
+      });
+      const edgeLayer = edges.map((edge) => {
+        const source = positions.get(edge.sourceKey);
+        const target = positions.get(edge.targetKey);
+        if (!source || !target) return '';
+        const opacity = Math.min(0.64, 0.12 + edge.similarity * 0.56);
+        return `<line x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}" stroke="rgba(86,214,201,${opacity.toFixed(2)})" stroke-width="${Math.max(0.8, edge.similarity * 1.8).toFixed(2)}"></line>`;
+      }).join('');
+      const nodeLayer = nodeDocs.map((doc, index) => {
+        const key = doc.title || doc.filename;
+        const position = positions.get(key);
+        const docDegree = degree.get(key) || 1;
+        const radius = 4 + (docDegree / maxDegree) * 9;
+        const color = categoryPalette[doc.evidence_category] || chartColors.blue;
+        const label = `${doc.title || doc.filename} · ${doc.evidence_category || 'Unclassified'} · ${docDegree} links`;
+        return `
+          <g class="chart-click-target" data-search="${escapeHtml(key)}" role="button" tabindex="0" aria-label="Search documents for ${escapeHtml(doc.title || doc.filename)}">
+            <circle cx="${position.x}" cy="${position.y}" r="${radius}" fill="${color}" opacity="0.86" stroke="rgba(244,239,225,0.22)">
+              <title>${escapeHtml(label)}</title>
+            </circle>
+          </g>`;
+      }).join('');
+      node.innerHTML = `
+        <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img">
+          <circle cx="${centerX}" cy="${centerY}" r="${minRadius}" fill="none" stroke="rgba(200,78,83,0.18)"></circle>
+          <circle cx="${centerX}" cy="${centerY}" r="${(minRadius + maxRadius) / 2}" fill="none" stroke="rgba(214,168,79,0.16)"></circle>
+          <circle cx="${centerX}" cy="${centerY}" r="${maxRadius}" fill="none" stroke="rgba(86,214,201,0.14)"></circle>
+          ${edgeLayer}
+          ${nodeLayer}
+        </svg>
+        ${chartLegend((analysis.evidence_category_counts || []).map((category) => ({ label: category.label, color: categoryPalette[category.label] || chartColors.blue })))}`;
+      bindChartFilterTargets('#relatedSourceNetwork [data-search]', (element) => openDocumentsWithFilters({ search: element.dataset.search }));
+    }
+
     function defaultDocumentFilters() {
       return {
         search: '',
@@ -6828,20 +7233,9 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     function updateDashboard() {
       const analysisItems = documents;
       const documentItems = filteredDocuments();
-      const yearly = countBy(analysisItems.filter((doc) => doc.year), (doc) => doc.year).sort((a, b) => Number(a.label) - Number(b.label));
       const types = countBy(analysisItems, (doc) => doc.document_type).sort((a, b) => b.count - a.count).slice(0, 12);
       renderMetrics(analysisItems);
       renderExecutiveSummary();
-      renderBarChart('timelineChart', yearly, chartColors.teal, false, {
-        actionDataKey: 'year',
-        actionLabel: (entry) => `Filter documents to ${entry.label}`,
-      });
-      bindChartFilterTargets('#timelineChart [data-year]', (element) => {
-        const year = Number(element.dataset.year);
-        if (Number.isFinite(year)) {
-          openDocumentsWithFilters({ yearMin: year, yearMax: year });
-        }
-      });
       renderBarChart('typeChart', types, chartColors.gold, true, {
         actionDataKey: 'type',
         actionLabel: (entry) => `Filter documents to ${entry.label}`,
@@ -6853,6 +7247,12 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       renderOrganizations(analysisItems);
       renderClassifications(analysisItems);
       renderCapabilityMatrix(analysisItems);
+      renderEvidenceTimeline(analysisItems);
+      renderResolutionChart(analysisItems);
+      renderObservationModeMatrix(analysisItems);
+      renderCorroborationCategoryMatrix(analysisItems);
+      renderPhenomenologyMatrix(analysisItems);
+      renderRelatedSourceNetwork(analysisItems);
       renderDocuments(documentItems);
     }
 
