@@ -679,6 +679,11 @@ def parse_args() -> argparse.Namespace:
     help="Exact Markdown output path. Only valid with one input.",
   )
   parser.add_argument(
+    "--overwrite",
+    action="store_true",
+    help="Recreate Markdown output files even when they already exist.",
+  )
+  parser.add_argument(
     "--page-image-dir",
     type=Path,
     help="Optional directory where rendered page JPEGs are saved for inspection.",
@@ -766,6 +771,9 @@ def main() -> int:
         else:
           image_dir = Path(temp_dir) / input_path.stem
         output_path = output_path_for_input(input_path, args.output_dir, args.output_file).resolve()
+        if output_path.exists() and not args.overwrite:
+          print(f"Skipping {input_path}: output already exists at {output_path} (use --overwrite to recreate)", file=sys.stderr)
+          continue
         asyncio.run(
           ocr_document(
             input_path=input_path,
