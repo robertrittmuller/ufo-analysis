@@ -5597,7 +5597,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 14px;
-      align-items: end;
+      align-items: start;
       background:
         linear-gradient(90deg, rgba(86, 214, 201, 0.08), transparent 45%),
         var(--panel-deep);
@@ -5605,6 +5605,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
 
     label {{
       display: grid;
+      align-content: start;
       gap: 7px;
       font-size: 0.74rem;
       letter-spacing: 0.14em;
@@ -6787,9 +6788,6 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         <label>Source Type
           <select id=\"typeFilter\"></select>
         </label>
-        <label>Extraction Method
-          <select id=\"methodFilter\"></select>
-        </label>
         <label>Evidence Category
           <select id="categoryFilter"></select>
         </label>
@@ -6858,7 +6856,6 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       page: 1,
       search: '',
       type: 'all',
-      method: 'all',
       category: 'all',
       capability: 'all',
       place: 'all',
@@ -7420,7 +7417,6 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       return documents.filter((doc) => {
         const year = doc.year || doc.year_start || doc.year_end;
         if (state.type !== 'all' && doc.document_type !== state.type) return false;
-        if (state.method !== 'all' && doc.extraction_method !== state.method) return false;
         if (state.category !== 'all' && doc.evidence_category !== state.category) return false;
         if (state.capability !== 'all' && !(doc.capability_keys || []).includes(state.capability)) return false;
         if (state.place !== 'all' && (!doc.location || doc.location.label !== state.place)) return false;
@@ -8066,7 +8062,6 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       return {
         search: '',
         type: 'all',
-        method: 'all',
         category: 'all',
         capability: 'all',
         place: 'all',
@@ -8078,7 +8073,6 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     function syncDocumentFilterControls() {
       document.getElementById('searchInput').value = state.search;
       document.getElementById('typeFilter').value = state.type;
-      document.getElementById('methodFilter').value = state.method;
       document.getElementById('categoryFilter').value = state.category;
       document.getElementById('capabilityFilter').value = state.capability;
       document.getElementById('placeFilter').value = state.place;
@@ -8340,7 +8334,6 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
 
     function initFilters() {
       populateFilter(document.getElementById('typeFilter'), 'types', [...new Set(documents.map((doc) => doc.document_type))].sort());
-      populateFilter(document.getElementById('methodFilter'), 'methods', [...new Set(documents.map((doc) => doc.extraction_method))].sort());
       populateFilter(document.getElementById('categoryFilter'), 'categories', analysis.evidence_category_counts.map((entry) => entry.label));
       populateFilter(document.getElementById('capabilityFilter'), 'capabilities', (analysis.capability_definitions || []).filter((definition) => (analysis.capability_matrix || []).some((entry) => entry.key === definition.key)).map((definition) => ({ label: definition.label, value: definition.key })));
       populateFilter(document.getElementById('placeFilter'), 'locations', [...new Set(documents.filter((doc) => doc.location).map((doc) => doc.location.label))].sort());
@@ -8354,11 +8347,6 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       }});
       document.getElementById('typeFilter').addEventListener('change', (event) => {{
         state.type = event.target.value;
-        resetDocumentPage();
-        updateDashboard();
-      }});
-      document.getElementById('methodFilter').addEventListener('change', (event) => {{
-        state.method = event.target.value;
         resetDocumentPage();
         updateDashboard();
       }});
