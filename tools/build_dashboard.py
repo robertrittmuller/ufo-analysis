@@ -134,6 +134,7 @@ EVIDENCE_CATEGORY_ALIASES = {
 }
 
 EVENT_DOCUMENT_TYPES = {"Incident Summary", "Mission Report", "Debrief / Reporting Form", "Transcript", "UAP Report"}
+SINGLE_INCIDENT_SOURCE_TYPES = EVENT_DOCUMENT_TYPES | {"Audio", "Imagery", "Statement", "Video"}
 EVENT_KEYWORDS = (
   "incident",
   "sighting",
@@ -4333,12 +4334,12 @@ def build_research_signals(documents: list[dict[str, object]]) -> list[str]:
     years = [doc["year"] for doc in documents if isinstance(doc.get("year"), int)]
     if years:
         peak_year, peak_count = Counter(years).most_common(1)[0]
-        signals.append(f"Peak document activity in the sampled corpus occurs in {peak_year}, with {peak_count} documents tied to that year.")
+        signals.append(f"Peak incident activity in the sampled corpus occurs in {peak_year}, with {peak_count} incidents tied to that year.")
 
     locations = [doc["location"]["label"] for doc in documents if doc.get("location")]
     if locations:
         hotspot, hotspot_count = Counter(locations).most_common(1)[0]
-        signals.append(f"The strongest geography cluster resolves around {hotspot}, appearing in {hotspot_count} documents.")
+        signals.append(f"The strongest geography cluster resolves around {hotspot}, appearing in {hotspot_count} incidents.")
 
     themes = Counter(theme for doc in documents for theme in doc.get("themes", []))
     if themes:
@@ -4352,12 +4353,12 @@ def build_research_signals(documents: list[dict[str, object]]) -> list[str]:
     capabilities = Counter(label for doc in documents for label in doc.get("capability_labels", []))
     if capabilities:
       leading_capability, leading_count = capabilities.most_common(1)[0]
-      signals.append(f"The most common observed capability label is {leading_capability.lower()}, appearing in {leading_count} sources.")
+      signals.append(f"The most common observed capability label is {leading_capability.lower()}, appearing in {leading_count} incidents.")
 
     evidence_categories = Counter(doc["evidence_category"] for doc in documents if isinstance(doc.get("evidence_category"), str))
     if evidence_categories:
       leading_label, leading_count = evidence_categories.most_common(1)[0]
-      signals.append(f"{leading_count} documents currently fall into {leading_label.lower()}, giving a quick read on how much of the corpus has corroborated event support versus weakly supported claims.")
+      signals.append(f"{leading_count} incidents currently fall into {leading_label.lower()}, giving a quick read on how much of the corpus has corroborated event support versus weakly supported claims.")
 
     return signals[:4]
 
@@ -4547,6 +4548,69 @@ def sanitize_dashboard_value(value: object) -> object:
 
 def sanitize_dashboard_document(document: dict[str, object]) -> dict[str, object]:
     return sanitize_dashboard_value(document)  # type: ignore[return-value]
+
+
+def source_document_incident_count(document: dict[str, object]) -> int:
+    children = document.get("child_sources")
+    if isinstance(children, list) and children:
+      return len([child for child in children if isinstance(child, dict)])
+    event_count = document.get("event_count")
+    if isinstance(event_count, int) and event_count > 0:
+      return event_count
+    return 0
+
+
+def is_single_incident_document(document: dict[str, object]) -> bool:
+    event_record_type = document.get("event_record_type")
+    if event_record_type in {"non_event_context", "policy_or_research_discussion"}:
+      return False
+    event_count = document.get("event_count")
+    if isinstance(event_count, int) and event_count != 1:
+      return False
+    document_type = document.get("document_type")
+    if isinstance(document_type, str) and document_type in SINGLE_INCIDENT_SOURCE_TYPES:
+      return True
+    return False
+
+
+def build_incident_documents(documents: list[dict[str, object]]) -> list[dict[str, object]]:
+    incidents: list[dict[str, object]] = []
+    for source_index, document in enumerate(documents):
+      children = [
+        child
+        for child in document.get("child_sources", [])
+        if isinstance(child, dict)
+      ] if isinstance(document.get("child_sources"), list) else []
+
+      if children:
+        for incident_index, child in enumerate(children, start=1):
+          incident = dict(child)
+          incident.setdefault("incident_count", 1)
+          incident["source_document_title"] = document.get("title")
+          incident["source_document_id"] = document.get("source_id")
+          incident["source_document_filename"] = document.get("filename")
+          incident["source_document_relative_path"] = document.get("relative_path")
+          incident["source_document_index"] = source_index
+          incident["source_document_incident_count"] = len(children)
+          incident["incident_index"] = incident_index
+          incidents.append(incident)
+        continue
+
+      if not is_single_incident_document(document):
+        continue
+
+      incident = dict(document)
+      incident.pop("child_sources", None)
+      incident["source_document_title"] = document.get("title")
+      incident["source_document_id"] = document.get("source_id")
+      incident["source_document_filename"] = document.get("filename")
+      incident["source_document_relative_path"] = document.get("relative_path")
+      incident["source_document_index"] = source_index
+      incident["source_document_incident_count"] = max(source_document_incident_count(document), 1)
+      incident["incident_index"] = 1
+      incidents.append(incident)
+
+    return incidents
 
 
 def annotate_document_tree(document: dict[str, object]) -> dict[str, object]:
@@ -5022,19 +5086,23 @@ def build_analysis(
     related_source_stats: dict[str, object] | None = None,
 ) -> dict[str, object]:
     documents = [annotate_document_tree(document) for document in documents]
+    incident_documents = [annotate_document_tree(document) for document in build_incident_documents(documents)]
     public_documents = [sanitize_dashboard_document(document) for document in documents]
+    public_incidents = [sanitize_dashboard_document(document) for document in incident_documents]
     public_executive_summary = sanitize_dashboard_value(executive_summary) if executive_summary else None
-    year_counts = Counter(doc["year"] for doc in documents if isinstance(doc.get("year"), int))
-    type_counts = Counter(doc["document_type"] for doc in documents)
-    method_counts = Counter(doc["extraction_method"] for doc in documents)
+    source_years = [doc["year"] for doc in documents if isinstance(doc.get("year"), int)]
+    analysis_documents = incident_documents
+    year_counts = Counter(doc["year"] for doc in analysis_documents if isinstance(doc.get("year"), int))
+    type_counts = Counter(doc["document_type"] for doc in analysis_documents)
+    method_counts = Counter(doc["extraction_method"] for doc in analysis_documents)
     media_counts = Counter(str(doc.get("media_type") or "pdf") for doc in documents)
-    evidence_category_counts = Counter(doc["evidence_category"] for doc in documents if isinstance(doc.get("evidence_category"), str))
-    theme_counts = Counter(theme for doc in documents for theme in doc.get("themes", []))
-    agency_counts = Counter(agency for doc in documents for agency in doc.get("agencies", []))
-    keyword_counts = Counter(term for doc in documents for term in doc.get("top_terms", []))
+    evidence_category_counts = Counter(doc["evidence_category"] for doc in analysis_documents if isinstance(doc.get("evidence_category"), str))
+    theme_counts = Counter(theme for doc in analysis_documents for theme in doc.get("themes", []))
+    agency_counts = Counter(agency for doc in analysis_documents for agency in doc.get("agencies", []))
+    keyword_counts = Counter(term for doc in analysis_documents for term in doc.get("top_terms", []))
 
     hotspots: dict[str, dict[str, object]] = {}
-    for doc in documents:
+    for doc in analysis_documents:
         location = doc.get("location")
         if not location:
             continue
@@ -5051,7 +5119,7 @@ def build_analysis(
         )
         hotspot["count"] += 1
 
-    years = [doc["year"] for doc in documents if isinstance(doc.get("year"), int)]
+    years = [doc["year"] for doc in analysis_documents if isinstance(doc.get("year"), int)]
     physical_sources = {
       str(doc.get("filename"))
       for doc in documents
@@ -5072,12 +5140,17 @@ def build_analysis(
         "generated_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
         "source_dir": str(source_dir),
         "document_count": len(documents),
+        "source_document_count": len(documents),
+        "incident_count": len(incident_documents),
+        "analysis_item_count": len(analysis_documents),
         "physical_source_count": len(physical_sources),
         "total_pages": sum(int(doc["page_count"]) for doc in documents),
         "total_physical_source_pages": sum(physical_source_pages.values()),
         "media_counts": [{"label": label, "count": count} for label, count in sorted(media_counts.items())],
         "year_min": min(years) if years else None,
         "year_max": max(years) if years else None,
+        "source_year_min": min(source_years) if source_years else None,
+        "source_year_max": max(source_years) if source_years else None,
         "year_counts": [{"year": year, "count": count} for year, count in sorted(year_counts.items())],
         "document_type_counts": [{"label": label, "count": count} for label, count in type_counts.most_common()],
         "extraction_method_counts": [{"label": label, "count": count} for label, count in method_counts.most_common()],
@@ -5102,7 +5175,7 @@ def build_analysis(
           }
           for field_name, definition in TREND_FIELD_DEFINITIONS.items()
         },
-        "trend_field_counts": build_trend_field_counts(documents),
+        "trend_field_counts": build_trend_field_counts(analysis_documents),
         "capability_definitions": [
           {
             "key": definition["key"],
@@ -5112,10 +5185,11 @@ def build_analysis(
           }
           for definition in CAPABILITY_DEFINITIONS
         ],
-        "capability_matrix": build_capability_matrix(documents),
-        "research_signals": build_research_signals(documents),
+        "capability_matrix": build_capability_matrix(analysis_documents),
+        "research_signals": build_research_signals(analysis_documents),
         "related_source_stats": related_source_stats or {"enabled": False},
         "executive_summary": public_executive_summary,
+        "incidents": public_incidents,
         "documents": public_documents,
     }
     return analysis
@@ -6707,6 +6781,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
 
     <div class=\"tab-strip\" role=\"tablist\" aria-label=\"Dashboard sections\">
       <button class=\"tab-button\" id=\"tab-overview\" type=\"button\" role=\"tab\" aria-selected=\"true\" aria-controls=\"panel-overview\" data-tab=\"overview\">Analysis</button>
+      <button class=\"tab-button\" id=\"tab-incidents\" type=\"button\" role=\"tab\" aria-selected=\"false\" aria-controls=\"panel-incidents\" data-tab=\"incidents\" tabindex=\"-1\">Incidents</button>
       <button class=\"tab-button\" id=\"tab-documents\" type=\"button\" role=\"tab\" aria-selected=\"false\" aria-controls=\"panel-documents\" data-tab=\"documents\" tabindex=\"-1\">Sources</button>
     </div>
 
@@ -6790,8 +6865,61 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       </div>
     </section>
 
+    <section class=\"tab-panel\" id=\"panel-incidents\" role=\"tabpanel\" aria-labelledby=\"tab-incidents\" hidden>
+      <section class=\"filters\" data-register-filters=\"incidents\">
+        <label>Keyword Search
+          <input id=\"incidentSearchInput\" type=\"search\" placeholder=\"Search incidents, summaries, themes, agencies\">
+        </label>
+        <label>Incident Type
+          <select id=\"incidentTypeFilter\"></select>
+        </label>
+        <label>Evidence Category
+          <select id=\"incidentCategoryFilter\"></select>
+        </label>
+        <label>Observed Capability
+          <select id=\"incidentCapabilityFilter\"></select>
+        </label>
+        <label>Geography
+          <select id=\"incidentPlaceFilter\"></select>
+        </label>
+        <label>Year From
+          <input id=\"incidentYearMin\" type=\"number\" inputmode=\"numeric\">
+        </label>
+        <label>Year To
+          <input id=\"incidentYearMax\" type=\"number\" inputmode=\"numeric\">
+        </label>
+      </section>
+
+      <div class=\"documents-summary\">
+        <div>These rows are incident-level records. Bundled source documents contribute one row per extracted incident.</div>
+        <strong id=\"incidentCount\"></strong>
+      </div>
+
+      <section class=\"panel\" id=\"incidentRegister\">
+        <h2>Incident Register</h2>
+        <div class=\"table-wrap\">
+          <table>
+            <thead>
+              <tr>
+                <th>Incident</th>
+                <th>Classification</th>
+                <th>Profile</th>
+                <th>Summary Narrative</th>
+              </tr>
+            </thead>
+            <tbody id=\"incidentRows\"></tbody>
+          </table>
+        </div>
+        <div class=\"pagination\">
+          <div id=\"incidentPaginationSummary\" class=\"pagination-summary\"></div>
+          <div id=\"incidentPaginationControls\" class=\"pagination-controls\"></div>
+        </div>
+        <div class=\"footer-note\">Incident rows preserve their source document and page-range metadata so they can be traced back to the original file.</div>
+      </section>
+    </section>
+
     <section class=\"tab-panel\" id=\"panel-documents\" role=\"tabpanel\" aria-labelledby=\"tab-documents\" hidden>
-      <section class=\"filters\">
+      <section class=\"filters\" data-register-filters=\"documents\">
         <label>Keyword Search
           <input id=\"searchInput\" type=\"search\" placeholder=\"Search titles, summaries, themes, agencies\">
         </label>
@@ -6839,7 +6967,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           <div id=\"paginationSummary\" class=\"pagination-summary\"></div>
           <div id=\"paginationControls\" class=\"pagination-controls\"></div>
         </div>
-        <div class=\"footer-note\">Rows marked with OCR page counts used image-based text recovery on low-text pages. Image and video rows use local media metadata plus release manifest narrative where available.</div>
+        <div class=\"footer-note\">Rows marked with incident counts contain multiple extracted or estimated incidents. OCR page counts indicate image-based text recovery on low-text pages.</div>
       </section>
     </section>
 
@@ -6861,16 +6989,35 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     const analysis = JSON.parse(document.getElementById('analysis-data').textContent);
     const worldLand = JSON.parse(document.getElementById('world-land-data').textContent);
     const documents = analysis.documents.slice().sort((a, b) => (b.year || 0) - (a.year || 0) || a.title.localeCompare(b.title));
+    const incidents = (analysis.incidents || []).slice().sort((a, b) => (b.year || 0) - (a.year || 0) || a.title.localeCompare(b.title));
+    const defaultYearMin = analysis.year_min || analysis.source_year_min || 1900;
+    const defaultYearMax = analysis.year_max || analysis.source_year_max || new Date().getFullYear();
+    const defaultSourceYearMin = analysis.source_year_min || analysis.year_min || 1900;
+    const defaultSourceYearMax = analysis.source_year_max || analysis.year_max || new Date().getFullYear();
     const state = {
       activeTab: 'overview',
-      page: 1,
-      search: '',
-      type: 'all',
-      category: 'all',
-      capability: 'all',
-      place: 'all',
-      yearMin: analysis.year_min || 1900,
-      yearMax: analysis.year_max || new Date().getFullYear(),
+      registers: {
+        incidents: {
+          page: 1,
+          search: '',
+          type: 'all',
+          category: 'all',
+          capability: 'all',
+          place: 'all',
+          yearMin: defaultYearMin,
+          yearMax: defaultYearMax,
+        },
+        documents: {
+          page: 1,
+          search: '',
+          type: 'all',
+          category: 'all',
+          capability: 'all',
+          place: 'all',
+          yearMin: defaultSourceYearMin,
+          yearMax: defaultSourceYearMax,
+        },
+      },
     };
     const chartColors = {
       ink: '#f4efe1',
@@ -7083,6 +7230,14 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     }
 
     function sourceContextSection(doc) {
+      if (doc.source_document_title && doc.source_document_title !== doc.title) {
+        const pageRange = doc.source_page_start && doc.source_page_end
+          ? (doc.source_page_start === doc.source_page_end ? `page ${doc.source_page_start}` : `pages ${doc.source_page_start}-${doc.source_page_end}`)
+          : '';
+        const sourceParts = [doc.source_document_title, doc.source_document_filename, pageRange].filter(Boolean);
+        return `<div class="muted"><strong>Source document:</strong> ${escapeHtml(sourceParts.join(' · '))}</div>`;
+      }
+
       if (doc.media_type === 'audio') {
         const source = doc.audio_source_characterization
           ? `${doc.audio_source_characterization}. `
@@ -7175,6 +7330,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       return renderDetailRows([
         ['Document type', doc.document_type],
         ['Media type', doc.media_type || 'pdf'],
+        ['Source document', doc.source_document_title],
         ['Date', doc.date_label || doc.year || doc.year_start || doc.year_end],
         ['Location', doc.location],
         ['Media profile', mediaProfileText(doc)],
@@ -7222,6 +7378,8 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         ['Source ID', doc.source_id],
         ['Filename', doc.filename],
         ['Parent file', doc.parent_filename],
+        ['Source document ID', doc.source_document_id],
+        ['Source document file', doc.source_document_filename],
         ['Relative path', doc.relative_path],
         ['Pages', doc.page_count],
         ['Parent file pages', doc.parent_page_count],
@@ -7316,6 +7474,10 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         : doc.evidence_category_rank === 2
           ? 'category-two'
           : 'category-three';
+      const detailLabel = doc.source_document_title && doc.source_document_title !== doc.title ? 'Incident Detail' : 'Source Detail';
+      const subtitle = doc.source_document_title && doc.source_document_title !== doc.title
+        ? [doc.source_document_title, doc.source_document_filename].filter(Boolean).join(' · ')
+        : (doc.filename || doc.relative_path || '');
       const overview = sourceDialogOverviewRows(doc);
       const evidence = sourceDialogEvidenceRows(doc);
       const technical = sourceDialogTechnicalRows(doc);
@@ -7323,9 +7485,9 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         <div class="source-dialog-shell">
           <header class="source-dialog-header">
             <div>
-              <div class="source-dialog-kicker">Source Detail</div>
+              <div class="source-dialog-kicker">${escapeHtml(detailLabel)}</div>
               <h2 id="sourceDialogTitle">${escapeHtml(doc.title)}</h2>
-              <div class="source-dialog-subtitle">${escapeHtml(doc.filename || doc.relative_path || '')}</div>
+              <div class="source-dialog-subtitle">${escapeHtml(subtitle)}</div>
             </div>
             <form method="dialog">
               <button class="source-dialog-close" type="submit" aria-label="Close source detail">&times;</button>
@@ -7361,7 +7523,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         button.addEventListener('click', () => {
           const search = button.dataset.dialogRelatedSearch;
           dialog.close();
-          if (search) openDocumentsWithFilters({ search });
+          if (search) openSourcesWithFilters({ search });
         });
       });
       dialog.querySelectorAll('[data-dialog-child-index]').forEach((button) => {
@@ -7380,11 +7542,12 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     }
 
     function bindSourceDetailButtons() {
-      document.querySelectorAll('[data-source-index]').forEach((button) => {
+      document.querySelectorAll('[data-register-kind][data-item-index]').forEach((button) => {
         button.addEventListener('click', () => {
-          const sourceIndex = Number(button.dataset.sourceIndex);
-          if (!Number.isInteger(sourceIndex) || sourceIndex < 0) return;
-          openSourceDialog(documents[sourceIndex], button);
+          const itemIndex = Number(button.dataset.itemIndex);
+          const items = registerItems(button.dataset.registerKind);
+          if (!Number.isInteger(itemIndex) || itemIndex < 0 || !items[itemIndex]) return;
+          openSourceDialog(items[itemIndex], button);
         });
       });
     }
@@ -7418,24 +7581,40 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       return `<div class="related-sources"><strong>Similar</strong><div class="related-source-links">${links}</div></div>`;
     }
 
-    function resetDocumentPage() {
-      state.page = 1;
+    function registerItems(kind) {
+      return kind === 'incidents' ? incidents : documents;
     }
 
-    function filteredDocuments() {
-      const search = state.search.trim().toLowerCase();
-      return documents.filter((doc) => {
+    function registerState(kind) {
+      return state.registers[kind];
+    }
+
+    function resetRegisterPage(kind) {
+      registerState(kind).page = 1;
+    }
+
+    function incidentCountLabel(doc) {
+      const count = doc.source_document_incident_count || doc.child_source_count || doc.event_count || 0;
+      return count > 1 ? `${count} incidents` : '';
+    }
+
+    function filteredRegisterItems(kind) {
+      const filters = registerState(kind);
+      const search = filters.search.trim().toLowerCase();
+      return registerItems(kind).filter((doc) => {
         const year = doc.year || doc.year_start || doc.year_end;
-        if (state.type !== 'all' && doc.document_type !== state.type) return false;
-        if (state.category !== 'all' && doc.evidence_category !== state.category) return false;
-        if (state.capability !== 'all' && !(doc.capability_keys || []).includes(state.capability)) return false;
-        if (state.place !== 'all' && (!doc.location || doc.location.label !== state.place)) return false;
-        if (year && year < state.yearMin) return false;
-        if (year && year > state.yearMax) return false;
+        if (filters.type !== 'all' && doc.document_type !== filters.type) return false;
+        if (filters.category !== 'all' && doc.evidence_category !== filters.category) return false;
+        if (filters.capability !== 'all' && !(doc.capability_keys || []).includes(filters.capability)) return false;
+        if (filters.place !== 'all' && (!doc.location || doc.location.label !== filters.place)) return false;
+        if (year && year < filters.yearMin) return false;
+        if (year && year > filters.yearMax) return false;
         if (!search) return true;
         const haystack = [
           doc.title,
           doc.filename || '',
+          doc.source_document_title || '',
+          doc.source_document_filename || '',
           doc.summary_narrative,
           doc.visual_observations || '',
           doc.audio_source_characterization || '',
@@ -7456,10 +7635,10 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
 
     function renderMeta() {
       const mediaCounts = Object.fromEntries((analysis.media_counts || []).map((entry) => [entry.label, entry.count]));
-      const mediaTotal = (mediaCounts.image || 0) + (mediaCounts.video || 0);
+      const mediaTotal = (mediaCounts.image || 0) + (mediaCounts.video || 0) + (mediaCounts.audio || 0);
       document.getElementById('metaDocs').textContent = mediaTotal
-        ? `${analysis.document_count} sources, ${mediaTotal} media`
-        : `${analysis.document_count} sources`;
+        ? `${analysis.incident_count || 0} incidents, ${analysis.source_document_count || analysis.document_count} sources, ${mediaTotal} media`
+        : `${analysis.incident_count || 0} incidents, ${analysis.source_document_count || analysis.document_count} sources`;
       document.getElementById('metaPages').textContent = `${analysis.total_pages} pages`;
       document.getElementById('metaYears').textContent = analysis.year_min && analysis.year_max
         ? `${analysis.year_min}–${analysis.year_max}`
@@ -7470,13 +7649,13 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     function renderMetrics(items) {
       const years = items.map((doc) => doc.year).filter(Boolean);
       const ocrDocs = items.filter((doc) => doc.extraction_method === 'ocr' || doc.extraction_method === 'hybrid').length;
-      const mediaItems = items.filter((doc) => doc.media_type === 'image' || doc.media_type === 'video' || doc.media_type === 'audio').length;
       const located = items.filter((doc) => doc.location).length;
-      const pages = items.reduce((sum, doc) => sum + (doc.page_count || 0), 0);
+      const mediaCounts = Object.fromEntries((analysis.media_counts || []).map((entry) => [entry.label, entry.count]));
+      const mediaItems = (mediaCounts.image || 0) + (mediaCounts.video || 0) + (mediaCounts.audio || 0);
       const cards = [
-        { value: items.length, label: 'Sources in view' },
-        { value: pages, label: 'PDF pages represented' },
-        { value: mediaItems, label: 'Media items' },
+        { value: items.length, label: 'Incidents in analysis' },
+        { value: analysis.total_pages || 0, label: 'Source archive pages' },
+        { value: mediaItems, label: 'Media source files' },
         { value: located, label: 'Resolved geolocations' },
         { value: ocrDocs, label: 'OCR-assisted files' },
         { value: years.length ? Math.min(...years) : '—', label: 'Earliest anchor year' },
@@ -7537,7 +7716,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         const value = entry.filterValue ?? entry.label;
         const ariaLabel = options.actionLabel
           ? options.actionLabel(entry)
-          : `Filter documents to ${entry.label}`;
+          : `Filter incidents to ${entry.label}`;
         return ` class="chart-click-target" data-${options.actionDataKey}="${escapeHtml(value)}" role="button" tabindex="0" aria-label="${escapeHtml(ariaLabel)}"`;
       };
 
@@ -7661,7 +7840,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         }
         const title = `${cluster.label} (${cluster.count})`;
         return `
-          <g class="chart-click-target" data-place="${escapeHtml(cluster.label)}" role="button" tabindex="0" aria-label="Filter documents to ${escapeHtml(cluster.label)}">
+          <g class="chart-click-target" data-place="${escapeHtml(cluster.label)}" role="button" tabindex="0" aria-label="Filter incidents to ${escapeHtml(cluster.label)}">
             <circle cx="${x}" cy="${y}" r="${radius}" fill="rgba(86,214,201,0.16)" stroke="${chartColors.teal}" stroke-width="1.6">
               <title>${escapeHtml(title)}</title>
             </circle>
@@ -7694,7 +7873,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       if (years.length) {
         const counts = countBy(items.filter((doc) => doc.year), (doc) => doc.year).sort((a, b) => b.count - a.count);
         signals.push({
-          text: `Peak activity in the corpus lands in ${counts[0].label} with ${counts[0].count} documents.`,
+          text: `Peak activity in the corpus lands in ${counts[0].label} with ${counts[0].count} incidents.`,
           filters: { yearMin: Number(counts[0].label), yearMax: Number(counts[0].label) },
         });
       }
@@ -7717,7 +7896,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           filters: definition ? { capability: definition.key } : { search: capabilities[0].label },
         });
       }
-      document.getElementById('researchSignals').innerHTML = signals.map((signal, index) => `<div class="signal chart-click-target" data-signal-index="${index}" role="button" tabindex="0" aria-label="Filter documents for this research signal">${escapeHtml(signal.text)}</div>`).join('');
+      document.getElementById('researchSignals').innerHTML = signals.map((signal, index) => `<div class="signal chart-click-target" data-signal-index="${index}" role="button" tabindex="0" aria-label="Filter incidents for this research signal">${escapeHtml(signal.text)}</div>`).join('');
       bindChartFilterTargets('#researchSignals [data-signal-index]', (element) => {
         const signal = signals[Number(element.dataset.signalIndex)];
         if (signal) {
@@ -7731,7 +7910,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         .sort((a, b) => b.count - a.count)
         .slice(0, 10);
       document.getElementById('themeGrid').innerHTML = themes.length
-        ? themes.map((entry) => `<div class="theme-chip chart-click-target" data-search="${escapeHtml(entry.label)}" role="button" tabindex="0" aria-label="Search documents for ${escapeHtml(entry.label)}"><strong>${escapeHtml(entry.label)}</strong><div class="muted">${entry.count} documents</div></div>`).join('')
+        ? themes.map((entry) => `<div class="theme-chip chart-click-target" data-search="${escapeHtml(entry.label)}" role="button" tabindex="0" aria-label="Search incidents for ${escapeHtml(entry.label)}"><strong>${escapeHtml(entry.label)}</strong><div class="muted">${entry.count} incidents</div></div>`).join('')
         : '<p class="chart-note">No themes match the current filters.</p>';
       bindChartFilterTargets('#themeGrid [data-search]', (element) => openDocumentsWithFilters({ search: element.dataset.search }));
     }
@@ -7745,7 +7924,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         .slice(0, 12);
       renderBarChart('organizationChart', organizations, chartColors.green, true, {
         actionDataKey: 'search',
-        actionLabel: (entry) => `Search documents for ${entry.label}`,
+        actionLabel: (entry) => `Search incidents for ${entry.label}`,
       });
       bindChartFilterTargets('#organizationChart [data-search]', (element) => openDocumentsWithFilters({ search: element.dataset.search }));
     }
@@ -7760,7 +7939,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         .sort((a, b) => a.rank - b.rank);
       renderBarChart('classificationChart', categories, chartColors.red, true, {
         actionDataKey: 'category',
-        actionLabel: (entry) => `Filter documents to ${entry.label}`,
+        actionLabel: (entry) => `Filter incidents to ${entry.label}`,
       });
       bindChartFilterTargets('#classificationChart [data-category]', (element) => openDocumentsWithFilters({ category: element.dataset.category }));
     }
@@ -7820,7 +7999,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           if (!category.count) return '';
           const title = `${category.label}, ${row.year}: ${category.count}`;
           return `
-            <g class="chart-click-target" data-year="${row.year}" data-category="${escapeHtml(category.label)}" role="button" tabindex="0" aria-label="Filter documents to ${escapeHtml(title)}">
+            <g class="chart-click-target" data-year="${row.year}" data-category="${escapeHtml(category.label)}" role="button" tabindex="0" aria-label="Filter incidents to ${escapeHtml(title)}">
               <rect x="${x}" y="${yCursor}" width="${barWidth}" height="${Math.max(segmentHeight, 1)}" fill="${categoryPalette[category.label] || chartColors.blue}" opacity="0.84">
                 <title>${escapeHtml(title)}</title>
               </rect>
@@ -7877,7 +8056,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           xCursor += widthForCount;
           const title = `${status.label} · ${humanizeToken(explanation)}: ${count}`;
           return `
-            <g class="chart-click-target" data-search="${escapeHtml(status.key)}" role="button" tabindex="0" aria-label="Search documents for ${escapeHtml(status.label)}">
+            <g class="chart-click-target" data-search="${escapeHtml(status.key)}" role="button" tabindex="0" aria-label="Search incidents for ${escapeHtml(status.label)}">
               <rect x="${x}" y="${y}" width="${Math.max(widthForCount, 1)}" height="22" fill="${explanationColors[explanation]}" opacity="0.78">
                 <title>${escapeHtml(title)}</title>
               </rect>
@@ -8050,7 +8229,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         const color = categoryPalette[doc.evidence_category] || chartColors.blue;
         const label = `${doc.title || doc.filename} · ${doc.evidence_category || 'Unclassified'} · ${docDegree} links`;
         return `
-          <g class="chart-click-target" data-search="${escapeHtml(key)}" role="button" tabindex="0" aria-label="Search documents for ${escapeHtml(doc.title || doc.filename)}">
+          <g class="chart-click-target" data-search="${escapeHtml(key)}" role="button" tabindex="0" aria-label="Search incidents for ${escapeHtml(doc.title || doc.filename)}">
             <circle cx="${position.x}" cy="${position.y}" r="${radius}" fill="${color}" opacity="0.86" stroke="rgba(244,239,225,0.22)">
               <title>${escapeHtml(label)}</title>
             </circle>
@@ -8068,36 +8247,71 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       bindChartFilterTargets('#relatedSourceNetwork [data-search]', (element) => openDocumentsWithFilters({ search: element.dataset.search }));
     }
 
-    function defaultDocumentFilters() {
+    function defaultRegisterFilters(kind) {
+      const yearMin = kind === 'documents' ? defaultSourceYearMin : defaultYearMin;
+      const yearMax = kind === 'documents' ? defaultSourceYearMax : defaultYearMax;
       return {
         search: '',
         type: 'all',
         category: 'all',
         capability: 'all',
         place: 'all',
-        yearMin: analysis.year_min || 1900,
-        yearMax: analysis.year_max || new Date().getFullYear(),
+        yearMin,
+        yearMax,
       };
     }
 
-    function syncDocumentFilterControls() {
-      document.getElementById('searchInput').value = state.search;
-      document.getElementById('typeFilter').value = state.type;
-      document.getElementById('categoryFilter').value = state.category;
-      document.getElementById('capabilityFilter').value = state.capability;
-      document.getElementById('placeFilter').value = state.place;
-      document.getElementById('yearMin').value = state.yearMin;
-      document.getElementById('yearMax').value = state.yearMax;
+    function registerControlIds(kind) {
+      if (kind === 'incidents') {
+        return {
+          search: 'incidentSearchInput',
+          type: 'incidentTypeFilter',
+          category: 'incidentCategoryFilter',
+          capability: 'incidentCapabilityFilter',
+          place: 'incidentPlaceFilter',
+          yearMin: 'incidentYearMin',
+          yearMax: 'incidentYearMax',
+        };
+      }
+      return {
+        search: 'searchInput',
+        type: 'typeFilter',
+        category: 'categoryFilter',
+        capability: 'capabilityFilter',
+        place: 'placeFilter',
+        yearMin: 'yearMin',
+        yearMax: 'yearMax',
+      };
+    }
+
+    function syncRegisterFilterControls(kind) {
+      const filters = registerState(kind);
+      const ids = registerControlIds(kind);
+      document.getElementById(ids.search).value = filters.search;
+      document.getElementById(ids.type).value = filters.type;
+      document.getElementById(ids.category).value = filters.category;
+      document.getElementById(ids.capability).value = filters.capability;
+      document.getElementById(ids.place).value = filters.place;
+      document.getElementById(ids.yearMin).value = filters.yearMin;
+      document.getElementById(ids.yearMax).value = filters.yearMax;
+    }
+
+    function openRegisterWithFilters(kind, filters) {
+      Object.assign(registerState(kind), defaultRegisterFilters(kind), filters);
+      resetRegisterPage(kind);
+      syncRegisterFilterControls(kind);
+      setActiveTab(kind);
+      requestAnimationFrame(() => {
+        document.getElementById(kind === 'incidents' ? 'incidentRegister' : 'documentRegister')?.scrollIntoView({ block: 'start' });
+      });
     }
 
     function openDocumentsWithFilters(filters) {
-      Object.assign(state, defaultDocumentFilters(), filters);
-      resetDocumentPage();
-      syncDocumentFilterControls();
-      setActiveTab('documents');
-      requestAnimationFrame(() => {
-        document.getElementById('documentRegister')?.scrollIntoView({ block: 'start' });
-      });
+      openRegisterWithFilters('incidents', filters);
+    }
+
+    function openSourcesWithFilters(filters) {
+      openRegisterWithFilters('documents', filters);
     }
 
     function renderCapabilityMatrix(items) {
@@ -8137,7 +8351,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           return `<div class="capability-cell" style="--intensity: ${intensity}" title="${escapeHtml(category.label)}: ${category.count}">${category.count || ''}</div>`;
         }).join('');
         return `
-          <div class="capability-row chart-click-target" data-capability="${escapeHtml(entry.key)}" role="button" tabindex="0" aria-label="Filter documents to ${escapeHtml(entry.label)}">
+          <div class="capability-row chart-click-target" data-capability="${escapeHtml(entry.key)}" role="button" tabindex="0" aria-label="Filter incidents to ${escapeHtml(entry.label)}">
             <div class="capability-label">
               <strong>${escapeHtml(entry.label)}</strong>
               <span>${escapeHtml(entry.group)}</span>
@@ -8150,11 +8364,16 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       bindChartFilterTargets('#capabilityMatrix [data-capability]', (element) => openDocumentsWithFilters({ capability: element.dataset.capability }));
     }
 
-    function renderDocuments(items) {
+    function renderRegister(kind, items) {
+      const filters = registerState(kind);
+      const isIncidentRegister = kind === 'incidents';
+      const countId = isIncidentRegister ? 'incidentCount' : 'documentCount';
+      const summaryId = isIncidentRegister ? 'incidentPaginationSummary' : 'paginationSummary';
+      const rowsId = isIncidentRegister ? 'incidentRows' : 'documentRows';
       const totalItems = items.length;
       const totalPages = Math.max(1, Math.ceil(totalItems / DOCUMENTS_PER_PAGE));
-      state.page = Math.min(Math.max(state.page, 1), totalPages);
-      const startIndex = totalItems ? (state.page - 1) * DOCUMENTS_PER_PAGE : 0;
+      filters.page = Math.min(Math.max(filters.page, 1), totalPages);
+      const startIndex = totalItems ? (filters.page - 1) * DOCUMENTS_PER_PAGE : 0;
       const pageItems = items.slice(startIndex, startIndex + DOCUMENTS_PER_PAGE);
       const rows = pageItems.map((doc) => {
         const categoryClass = doc.evidence_category_rank === 1
@@ -8164,6 +8383,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
             : 'category-three';
         const tags = [
           doc.media_type && doc.media_type !== 'pdf' ? doc.media_type.toUpperCase() : '',
+          !isIncidentRegister && incidentCountLabel(doc) ? incidentCountLabel(doc).toUpperCase() : '',
           doc.document_type,
           doc.extraction_method.toUpperCase(),
           doc.review_status === 'reviewed' ? 'REVIEWED' : '',
@@ -8178,6 +8398,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         const profile = [
           doc.date_label || (doc.year ? `${doc.year}` : 'Undated'),
           doc.location ? doc.location.label : 'No location resolved',
+          isIncidentRegister && doc.source_document_title ? `Source: ${doc.source_document_title}` : '',
           mediaProfile,
           doc.capability_profile && doc.capability_profile !== 'No capability label' ? doc.capability_profile : '',
           (doc.media_type || 'pdf') === 'pdf' ? (doc.ocr_pages ? `${doc.ocr_pages} OCR pages` : 'Native text') : doc.extraction_method.replace('_', ' '),
@@ -8187,7 +8408,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         const sourceContext = sourceContextSection(doc);
         const relatedSources = relatedSourcesSection(doc);
         const href = sourceHref(doc);
-        const sourceIndex = documents.indexOf(doc);
+        const itemIndex = registerItems(kind).indexOf(doc);
         const previewPanel = doc.thumbnail_url
           ? `<details class="source-preview">
               <summary>${escapeHtml(sourcePreviewLabel(doc))}</summary>
@@ -8199,8 +8420,8 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           : '';
         return `
           <tr>
-            <td data-label="Source">
-              <p class="doc-title"><button class="source-title-button" type="button" data-source-index="${sourceIndex}" aria-haspopup="dialog">${escapeHtml(doc.title)}</button></p>
+            <td data-label="${isIncidentRegister ? 'Incident' : 'Source'}">
+              <p class="doc-title"><button class="source-title-button" type="button" data-register-kind="${kind}" data-item-index="${itemIndex}" aria-haspopup="dialog">${escapeHtml(doc.title)}</button></p>
               ${previewPanel}
               <div class="tag-row">${tags}</div>
             </td>
@@ -8213,14 +8434,14 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           </tr>`;
       }).join('');
       const paginationSummary = totalItems
-        ? `Showing ${startIndex + 1}-${Math.min(startIndex + DOCUMENTS_PER_PAGE, totalItems)} of ${totalItems} sources`
-        : 'No sources in register';
-      document.getElementById('documentCount').textContent = `${totalItems} sources in register`;
-      document.getElementById('paginationSummary').textContent = paginationSummary;
-      document.getElementById('documentRows').innerHTML = rows || '<tr><td colspan="4">No sources match the current filters.</td></tr>';
+        ? `Showing ${startIndex + 1}-${Math.min(startIndex + DOCUMENTS_PER_PAGE, totalItems)} of ${totalItems} ${isIncidentRegister ? 'incidents' : 'sources'}`
+        : `No ${isIncidentRegister ? 'incidents' : 'sources'} in register`;
+      document.getElementById(countId).textContent = `${totalItems} ${isIncidentRegister ? 'incidents' : 'sources'} in register`;
+      document.getElementById(summaryId).textContent = paginationSummary;
+      document.getElementById(rowsId).innerHTML = rows || `<tr><td colspan="4">No ${isIncidentRegister ? 'incidents' : 'sources'} match the current filters.</td></tr>`;
       bindSourceDetailButtons();
       bindRelatedSourceLinks();
-      renderPaginationControls(totalItems, totalPages);
+      renderPaginationControls(kind, totalItems, totalPages);
     }
 
     function bindRelatedSourceLinks() {
@@ -8231,19 +8452,20 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
             return;
           }
           event.preventDefault();
-          openDocumentsWithFilters({ search });
+          openSourcesWithFilters({ search });
         });
       });
     }
 
-    function renderPaginationControls(totalItems, totalPages) {
-      const container = document.getElementById('paginationControls');
+    function renderPaginationControls(kind, totalItems, totalPages) {
+      const filters = registerState(kind);
+      const container = document.getElementById(kind === 'incidents' ? 'incidentPaginationControls' : 'paginationControls');
       if (!totalItems) {
         container.innerHTML = '';
         return;
       }
       const pages = [];
-      const windowStart = Math.max(1, state.page - 2);
+      const windowStart = Math.max(1, filters.page - 2);
       const windowEnd = Math.min(totalPages, windowStart + 4);
       const adjustedStart = Math.max(1, windowEnd - 4);
       for (let page = adjustedStart; page <= windowEnd; page += 1) {
@@ -8255,20 +8477,20 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           type="button"
           data-page="${page}"
           aria-label="Go to page ${page}"
-          ${page === state.page ? 'aria-current="page"' : ''}
+          ${page === filters.page ? 'aria-current="page"' : ''}
         >${page}</button>`).join('');
       container.innerHTML = `
-        <button class="pagination-button" type="button" data-page="${state.page - 1}" ${state.page === 1 ? 'disabled' : ''}>Previous</button>
+        <button class="pagination-button" type="button" data-page="${filters.page - 1}" ${filters.page === 1 ? 'disabled' : ''}>Previous</button>
         ${pageButtons}
-        <button class="pagination-button" type="button" data-page="${state.page + 1}" ${state.page === totalPages ? 'disabled' : ''}>Next</button>`;
+        <button class="pagination-button" type="button" data-page="${filters.page + 1}" ${filters.page === totalPages ? 'disabled' : ''}>Next</button>`;
       container.querySelectorAll('[data-page]').forEach((button) => {
         button.addEventListener('click', () => {
           const nextPage = Number(button.dataset.page);
-          if (!Number.isFinite(nextPage) || nextPage === state.page || nextPage < 1 || nextPage > totalPages) {
+          if (!Number.isFinite(nextPage) || nextPage === filters.page || nextPage < 1 || nextPage > totalPages) {
             return;
           }
-          state.page = nextPage;
-          renderDocuments(filteredDocuments());
+          filters.page = nextPage;
+          renderRegister(kind, filteredRegisterItems(kind));
         });
       });
     }
@@ -8309,14 +8531,15 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     }
 
     function updateDashboard() {
-      const analysisItems = documents;
-      const documentItems = filteredDocuments();
+      const analysisItems = incidents;
+      const incidentItems = filteredRegisterItems('incidents');
+      const documentItems = filteredRegisterItems('documents');
       const types = countBy(analysisItems, (doc) => doc.document_type).sort((a, b) => b.count - a.count).slice(0, 12);
       renderMetrics(analysisItems);
       renderExecutiveSummary();
       renderBarChart('typeChart', types, chartColors.gold, true, {
         actionDataKey: 'type',
-        actionLabel: (entry) => `Filter documents to ${entry.label}`,
+        actionLabel: (entry) => `Filter incidents to ${entry.label}`,
       });
       bindChartFilterTargets('#typeChart [data-type]', (element) => openDocumentsWithFilters({ type: element.dataset.type }));
       renderMap(analysisItems);
@@ -8331,7 +8554,8 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       renderCorroborationCategoryMatrix(analysisItems);
       renderPhenomenologyMatrix(analysisItems);
       renderRelatedSourceNetwork(analysisItems);
-      renderDocuments(documentItems);
+      renderRegister('incidents', incidentItems);
+      renderRegister('documents', documentItems);
     }
 
     function populateFilter(select, label, values) {
@@ -8343,48 +8567,51 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     }
 
     function initFilters() {
-      populateFilter(document.getElementById('typeFilter'), 'types', [...new Set(documents.map((doc) => doc.document_type))].sort());
-      populateFilter(document.getElementById('categoryFilter'), 'categories', analysis.evidence_category_counts.map((entry) => entry.label));
-      populateFilter(document.getElementById('capabilityFilter'), 'capabilities', (analysis.capability_definitions || []).filter((definition) => (analysis.capability_matrix || []).some((entry) => entry.key === definition.key)).map((definition) => ({ label: definition.label, value: definition.key })));
-      populateFilter(document.getElementById('placeFilter'), 'locations', [...new Set(documents.filter((doc) => doc.location).map((doc) => doc.location.label))].sort());
-      document.getElementById('yearMin').value = state.yearMin;
-      document.getElementById('yearMax').value = state.yearMax;
+      ['incidents', 'documents'].forEach((kind) => {
+        const ids = registerControlIds(kind);
+        const items = registerItems(kind);
+        populateFilter(document.getElementById(ids.type), 'types', [...new Set(items.map((doc) => doc.document_type))].sort());
+        populateFilter(document.getElementById(ids.category), 'categories', analysis.evidence_category_counts.map((entry) => entry.label));
+        populateFilter(document.getElementById(ids.capability), 'capabilities', (analysis.capability_definitions || []).filter((definition) => items.some((doc) => (doc.capability_keys || []).includes(definition.key))).map((definition) => ({ label: definition.label, value: definition.key })));
+        populateFilter(document.getElementById(ids.place), 'locations', [...new Set(items.filter((doc) => doc.location).map((doc) => doc.location.label))].sort());
+        syncRegisterFilterControls(kind);
 
-      document.getElementById('searchInput').addEventListener('input', (event) => {{
-        state.search = event.target.value;
-        resetDocumentPage();
-        updateDashboard();
-      }});
-      document.getElementById('typeFilter').addEventListener('change', (event) => {{
-        state.type = event.target.value;
-        resetDocumentPage();
-        updateDashboard();
-      }});
-      document.getElementById('categoryFilter').addEventListener('change', (event) => {{
-        state.category = event.target.value;
-        resetDocumentPage();
-        updateDashboard();
-      }});
-      document.getElementById('capabilityFilter').addEventListener('change', (event) => {{
-        state.capability = event.target.value;
-        resetDocumentPage();
-        updateDashboard();
-      }});
-      document.getElementById('placeFilter').addEventListener('change', (event) => {{
-        state.place = event.target.value;
-        resetDocumentPage();
-        updateDashboard();
-      }});
-      document.getElementById('yearMin').addEventListener('input', (event) => {{
-        state.yearMin = Number(event.target.value) || analysis.year_min || 1900;
-        resetDocumentPage();
-        updateDashboard();
-      }});
-      document.getElementById('yearMax').addEventListener('input', (event) => {{
-        state.yearMax = Number(event.target.value) || analysis.year_max || new Date().getFullYear();
-        resetDocumentPage();
-        updateDashboard();
-      }});
+        document.getElementById(ids.search).addEventListener('input', (event) => {{
+          registerState(kind).search = event.target.value;
+          resetRegisterPage(kind);
+          updateDashboard();
+        }});
+        document.getElementById(ids.type).addEventListener('change', (event) => {{
+          registerState(kind).type = event.target.value;
+          resetRegisterPage(kind);
+          updateDashboard();
+        }});
+        document.getElementById(ids.category).addEventListener('change', (event) => {{
+          registerState(kind).category = event.target.value;
+          resetRegisterPage(kind);
+          updateDashboard();
+        }});
+        document.getElementById(ids.capability).addEventListener('change', (event) => {{
+          registerState(kind).capability = event.target.value;
+          resetRegisterPage(kind);
+          updateDashboard();
+        }});
+        document.getElementById(ids.place).addEventListener('change', (event) => {{
+          registerState(kind).place = event.target.value;
+          resetRegisterPage(kind);
+          updateDashboard();
+        }});
+        document.getElementById(ids.yearMin).addEventListener('input', (event) => {{
+          registerState(kind).yearMin = Number(event.target.value) || defaultRegisterFilters(kind).yearMin;
+          resetRegisterPage(kind);
+          updateDashboard();
+        }});
+        document.getElementById(ids.yearMax).addEventListener('input', (event) => {{
+          registerState(kind).yearMax = Number(event.target.value) || defaultRegisterFilters(kind).yearMax;
+          resetRegisterPage(kind);
+          updateDashboard();
+        }});
+      });
       window.addEventListener('resize', () => updateDashboard());
     }
 
@@ -8685,14 +8912,15 @@ def main() -> int:
 
     progress.finish()
 
-    corpus_signature = build_executive_summary_signature(documents)
+    summary_documents = build_incident_documents(documents)
+    corpus_signature = build_executive_summary_signature(summary_documents)
     cached_executive_summary = normalize_executive_summary_review(
         review_overrides.get(EXECUTIVE_SUMMARY_REVIEW_KEY),
         corpus_signature,
     )
     executive_summary = cached_executive_summary
     if reviewer is not None and (args.refresh_reviews or executive_summary is None):
-        generated_executive_summary = reviewer.review_corpus(documents)
+        generated_executive_summary = reviewer.review_corpus(summary_documents)
         if generated_executive_summary:
             executive_summary_review = {
                 **generated_executive_summary,
