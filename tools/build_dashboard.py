@@ -5067,6 +5067,8 @@ def attach_related_sources(
             "source_id": other.get("source_id"),
             "title": other.get("title"),
             "source_href": other.get("source_href"),
+            "original_source_url": other.get("original_source_url"),
+            "source_page_url": other.get("source_page_url"),
             "year": other.get("year"),
             "document_type": other.get("document_type"),
             "evidence_category": other.get("evidence_category"),
@@ -7179,8 +7181,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     }
 
     function sourceHref(doc) {
-      if (doc.parent_filename && doc.source_href) return doc.source_href;
-      return doc.original_source_url || doc.source_href || doc.source_page_url || '#';
+      return doc.original_source_url || doc.source_page_url || doc.source_href || '#';
     }
 
     function sourcePreviewLabel(doc) {
@@ -7647,7 +7648,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         const score = typeof source.similarity === 'number' ? ` ${Math.round(source.similarity * 100)}%` : '';
         const title = factors ? `${source.title} · ${factors}` : source.title;
         const filterValue = source.title || source.filename || '';
-        return `<a href="${escapeHtml(source.source_href || '#')}" data-related-search="${escapeHtml(filterValue)}" title="${escapeHtml(title)}">${escapeHtml(source.title || source.filename || 'Related source')}${escapeHtml(score)}</a>`;
+        return `<a href="${escapeHtml(sourceHref(source))}" data-related-search="${escapeHtml(filterValue)}" title="${escapeHtml(title)}">${escapeHtml(source.title || source.filename || 'Related source')}${escapeHtml(score)}</a>`;
       }).join('');
       return `<div class="related-sources"><strong>Similar</strong><div class="related-source-links">${links}</div></div>`;
     }
