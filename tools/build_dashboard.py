@@ -1361,7 +1361,7 @@ def load_document_cache(
   cached_review = payload.get("applied_review")
   if cached_review is not None and not isinstance(cached_review, dict):
     return None
-  if current_review is not None and cached_review != current_review:
+  if current_review is not None and cached_review is not None and cached_review != current_review:
     return None
 
   raw_documents = payload.get("documents")
@@ -1626,6 +1626,16 @@ def review_has_trend_fields(review: dict[str, object] | None) -> bool:
 
 def review_has_required_fields(review: dict[str, object] | None) -> bool:
   return review_has_evidence_category(review) and review_has_trend_fields(review)
+
+
+def cached_payload_documents_have_required_fields(payload: dict[str, object]) -> bool:
+  raw_documents = payload.get("documents")
+  if isinstance(raw_documents, list):
+    documents = [document for document in raw_documents if isinstance(document, dict)]
+  else:
+    document = payload.get("document")
+    documents = [document] if isinstance(document, dict) else []
+  return bool(documents) and all(review_has_required_fields(document) for document in documents)
 
 
 def trend_review_prompt_instructions() -> str:
@@ -8684,6 +8694,16 @@ def shorten_progress_label(label: str, max_length: int) -> str:
   return f"{label[:head]}...{label[-tail:]}"
 
 
+def shorten_progress_status(status: str, max_length: int) -> str:
+  if ": " not in status:
+    return shorten_progress_label(status, max_length)
+  prefix, label = status.split(": ", 1)
+  prefix = f"{prefix}: "
+  if len(prefix) >= max_length:
+    return shorten_progress_label(status, max_length)
+  return f"{prefix}{shorten_progress_label(label, max_length - len(prefix))}"
+
+
 @dataclass
 class BuildProgressBar:
   total: int
@@ -8697,6 +8717,11 @@ class BuildProgressBar:
     self.started_at = time.monotonic()
     if self.enabled:
       self.render("Starting")
+
+  def begin(self, path: Path) -> None:
+    if self.enabled:
+      current = min(self.completed + 1, self.total)
+      self.render(f"processing {current}/{self.total}: {path.name}")
 
   def advance(self, path: Path, *, cached: bool) -> None:
     self.completed += 1
@@ -8732,7 +8757,7 @@ class BuildProgressBar:
       f"c{self.cached} a{self.analyzed}"
     )
     available = max(0, width - len(prefix) - 3)
-    suffix = shorten_progress_label(status, available)
+    suffix = shorten_progress_status(status, available)
     line = prefix if not suffix else f"{prefix} | {suffix}"
     max_line_length = max(1, width - 1)
     self.stream.write("\r" + line[:max_line_length].ljust(max_line_length))
@@ -8815,11 +8840,12 @@ def main() -> int:
     progress = BuildProgressBar(total=len(source_paths), enabled=sys.stderr.isatty())
 
     for path in source_paths:
+        progress.begin(path)
         current_review = find_review_override(review_overrides, path.name)
         cache_file = document_cache_path(args.document_cache_dir, source_dir, path)
         cached_payload = None
         path_split_enabled = bool(args.split_source_pdfs and path.suffix.lower() in PDF_EXTENSIONS and pdf_split_kind(path))
-        if path.suffix.lower() in PDF_EXTENSIONS and not args.refresh_document_cache and not args.refresh_reviews:
+        if not args.refresh_document_cache and not args.refresh_reviews:
             cached_payload = load_document_cache(
                 cache_file=cache_file,
                 path=path,
@@ -8832,21 +8858,25 @@ def main() -> int:
             )
             if cached_payload is not None and args.review_mode == "hybrid" and not path_split_enabled:
               cached_review = cached_payload.get("applied_review")
-              if not review_has_required_fields(current_review or cached_review):
+              if not review_has_required_fields(current_review or cached_review) and not cached_payload_documents_have_required_fields(cached_payload):
                 cached_payload = None
 
         if cached_payload is not None:
             cached_review = cached_payload.get("applied_review")
+            resolved_cached_review = current_review if current_review is not None else cached_review
             if current_review is None and isinstance(cached_review, dict):
                 review_overrides[path.name] = cached_review
                 write_review_overrides(args.review_file, review_overrides)
                 review_file_updates += 1
             cached_payload_documents = cached_payload.get("documents")
             cached_document_list = cached_payload_documents if isinstance(cached_payload_documents, list) else []
+            cached_documents_to_write: list[dict[str, object]] = []
             for cached_item in cached_document_list:
                 if not isinstance(cached_item, dict):
                     continue
                 cached_document = dict(cached_item)
+                if current_review is not None:
+                    cached_document = apply_review_override(cached_document, current_review)
                 if path.suffix.lower() in PDF_EXTENSIONS:
                     cached_document.setdefault("media_type", "pdf")
                 cached_document.setdefault("source_id", source_id_for(path))
@@ -8857,6 +8887,19 @@ def main() -> int:
                 )
                 normalize_document_after_review(cached_document)
                 documents.append(cached_document)
+                cached_documents_to_write.append(cached_document)
+            if cached_review is None and isinstance(resolved_cached_review, dict) and cached_documents_to_write:
+                write_document_cache(
+                    cache_file=cache_file,
+                    path=path,
+                    source_dir=source_dir,
+                    documents=cached_documents_to_write,
+                    applied_review=resolved_cached_review,
+                    page_limit=args.page_limit,
+                    min_native_chars=args.min_native_chars,
+                    ocr_markdown_dir=args.ocr_markdown_dir,
+                    split_source_pdfs=path_split_enabled,
+                )
             cached_documents += len(cached_document_list)
             progress.advance(path, cached=True)
             continue
@@ -8898,7 +8941,7 @@ def main() -> int:
             path=path,
             source_dir=source_dir,
             documents=path_documents,
-            applied_review=review_overrides.get(path.name),
+            applied_review=find_review_override(review_overrides, path.name),
             page_limit=args.page_limit,
             min_native_chars=args.min_native_chars,
             ocr_markdown_dir=args.ocr_markdown_dir,
