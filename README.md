@@ -13,6 +13,8 @@ python3 tools/build_dashboard.py
 
 The generated dashboard is written to `dashboard/index.html`.
 
+PDF OCR uses the local LLM Markdown OCR flow. The builder reads files from `data/ocr_markdown` when present and creates missing Markdown OCR files with `tools/ocr_with_llm.py`.
+
 ## OCR a Document with the Local LLM
 
 Render PDF pages to images and ask the same local multimodal model used by the dashboard review flow to produce one Markdown OCR file:
@@ -21,7 +23,7 @@ Render PDF pages to images and ask the same local multimodal model used by the d
 python3 tools/ocr_with_llm.py data/sources/38_143685_box7_Incident_Summaries_1-100.pdf --pages 1 --output-dir data/ocr_markdown
 ```
 
-Use `--concurrency` to control simultaneous LLM requests; it defaults to 4. Use `--pages-per-request` to control how many page images are sent in each LLM call.
+Use `--concurrency` to control simultaneous LLM requests; it defaults to 4. Use `--pages-per-request` to control how many page images are sent in each LLM call. Existing Markdown outputs are skipped by default; pass `--overwrite` to recreate them.
 
 ## Deploy to Cloudflare Workers
 

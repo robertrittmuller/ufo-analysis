@@ -429,7 +429,7 @@ def parse_ocr_response(raw_text: str, expected_pages: list[PageImage]) -> list[P
     raise RuntimeError("model response JSON did not contain a pages array")
 
   expected_numbers = [page.page_number for page in expected_pages]
-  parsed: list[PageOcr] = []
+  parsed_by_page: dict[int, PageOcr] = {}
   for index, page_payload in enumerate(pages_value):
     if not isinstance(page_payload, dict):
       continue
@@ -437,16 +437,20 @@ def parse_ocr_response(raw_text: str, expected_pages: list[PageImage]) -> list[P
     page_number = page_number_value if isinstance(page_number_value, int) else None
     if page_number not in expected_numbers and index < len(expected_numbers):
       page_number = expected_numbers[index]
+    if page_number not in expected_numbers:
+      continue
     markdown = page_payload.get("markdown")
     if not isinstance(markdown, str):
       continue
-    parsed.append(PageOcr(page_number=page_number or expected_numbers[min(index, len(expected_numbers) - 1)], markdown=sanitize_page_markdown(markdown)))
+    if page_number in parsed_by_page:
+      continue
+    parsed_by_page[page_number] = PageOcr(page_number=page_number, markdown=sanitize_page_markdown(markdown))
 
-  found_numbers = {page.page_number for page in parsed}
+  found_numbers = set(parsed_by_page)
   missing_numbers = [page_number for page_number in expected_numbers if page_number not in found_numbers]
   if missing_numbers:
     raise RuntimeError(f"model response omitted page(s): {missing_numbers}")
-  return sorted(parsed, key=lambda page: expected_numbers.index(page.page_number))
+  return [parsed_by_page[page_number] for page_number in expected_numbers]
 
 
 def output_path_for_input(input_path: Path, output_dir: Path, output_file: Path | None) -> Path:
