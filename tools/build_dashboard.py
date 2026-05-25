@@ -5826,6 +5826,26 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       font-family: "Didot", "Baskerville", serif;
     }}
 
+    .executive-summary-incident-link {{
+      appearance: none;
+      border: 0;
+      border-bottom: 1px solid rgba(86, 214, 201, 0.58);
+      border-radius: 0;
+      padding: 0;
+      color: #9ee9df;
+      background: transparent;
+      cursor: pointer;
+      font: inherit;
+      text-align: inherit;
+    }}
+
+    .executive-summary-incident-link:hover,
+    .executive-summary-incident-link:focus-visible {{
+      color: #f4efe1;
+      border-bottom-color: var(--gold);
+      outline: none;
+    }}
+
     .executive-summary-meta {{
       display: inline-block;
       margin-top: 2px;
@@ -7078,6 +7098,47 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         .replaceAll('"', '&quot;');
     }
 
+    function escapeRegExp(value) {
+      return String(value ?? '').replace(/[.*+?^${{}}()|[\\]\\\\]/g, '\\\\$&');
+    }
+
+    function titleAliases(doc) {
+      const values = [doc.title, doc.source_document_title, doc.filename]
+        .filter((value) => typeof value === 'string' && value.trim().length >= 6)
+        .map((value) => value.trim());
+      return [...new Set(values)];
+    }
+
+    function incidentReferenceCandidates() {
+      const seen = new Set();
+      return incidents.flatMap((doc, index) => titleAliases(doc).map((title) => ({ title, index })))
+        .filter(({ title }) => {
+          const key = title.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .sort((left, right) => right.title.length - left.title.length);
+    }
+
+    function linkExecutiveSummaryText(text) {
+      const candidates = incidentReferenceCandidates();
+      if (!candidates.length) return escapeHtml(text);
+      const pattern = new RegExp(candidates.map((candidate) => escapeRegExp(candidate.title)).join('|'), 'gi');
+      let cursor = 0;
+      let output = '';
+      for (const match of text.matchAll(pattern)) {
+        const title = match[0];
+        const index = candidates.find((candidate) => candidate.title.toLowerCase() === title.toLowerCase())?.index;
+        if (!Number.isInteger(index)) continue;
+        output += escapeHtml(text.slice(cursor, match.index));
+        output += `<button class="executive-summary-incident-link" type="button" data-summary-incident-index="${index}" aria-haspopup="dialog">${escapeHtml(title)}</button>`;
+        cursor = match.index + title.length;
+      }
+      output += escapeHtml(text.slice(cursor));
+      return output;
+    }
+
     function countBy(items, keyFn) {
       const counts = new Map();
       items.forEach((item) => {
@@ -7686,11 +7747,18 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         node.innerHTML = '<p class="muted">No executive summary has been generated for this corpus yet.</p>';
         return;
       }
-      const paragraphs = sections.map((section) => `<p>${escapeHtml(section)}</p>`).join('');
+      const paragraphs = sections.map((section) => `<p>${linkExecutiveSummaryText(section)}</p>`).join('');
       const generated = summary.generated_at
         ? `<div class="executive-summary-meta">Generated ${escapeHtml(summary.generated_at.replace('T', ' ').replace('Z', ' UTC'))}</div>`
         : '';
       node.innerHTML = `${paragraphs}${generated}`;
+      node.querySelectorAll('[data-summary-incident-index]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const incidentIndex = Number(button.dataset.summaryIncidentIndex);
+          if (!Number.isInteger(incidentIndex) || !incidents[incidentIndex]) return;
+          openSourceDialog(incidents[incidentIndex], button);
+        });
+      });
     }
 
     function renderBarChart(targetId, entries, color, horizontal = false, options = {}) {
