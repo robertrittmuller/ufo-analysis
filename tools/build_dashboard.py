@@ -5794,7 +5794,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
 
     .capability-matrix {{
       display: grid;
-      gap: 9px;
+      gap: 7px;
     }}
 
     .capability-row {{
@@ -5804,7 +5804,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       align-items: stretch;
       width: 100%;
       min-width: 0;
-      padding: 8px 0;
+      padding: 7px 0;
       border-bottom: 1px solid rgba(244, 239, 225, 0.09);
     }}
 
@@ -5838,7 +5838,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
 
     .capability-cell,
     .capability-total {{
-      min-height: 34px;
+      min-height: 32px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -5847,6 +5847,16 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       color: var(--ink);
       font-size: 0.78rem;
       font-weight: 700;
+    }}
+
+    .capability-legend {{
+      margin-top: 1px;
+      color: var(--dim);
+      font-size: 0.64rem;
+      line-height: 1.35;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      overflow-wrap: anywhere;
     }}
 
     .capability-cell {{
@@ -8136,7 +8146,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
             <div class="capability-total">${entry.count}</div>
           </div>`;
       }).join('');
-      node.innerHTML = header + rows;
+      node.innerHTML = `${header}${rows}<div class="capability-legend">C1 detailed + hard evidence | C2 partial support | C3 limited support</div>`;
       bindChartFilterTargets('#capabilityMatrix [data-capability]', (element) => openDocumentsWithFilters({ capability: element.dataset.capability }));
     }
 
