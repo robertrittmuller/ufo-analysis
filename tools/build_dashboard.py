@@ -6502,7 +6502,10 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     }}
 
     .source-dialog-link-list a,
+    .source-dialog-link-list button,
     .related-detail-item button {{
+      display: block;
+      width: 100%;
       border: 1px solid rgba(244, 239, 225, 0.12);
       background: rgba(244, 239, 225, 0.05);
       color: var(--ink);
@@ -6517,6 +6520,8 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
 
     .source-dialog-link-list a:hover,
     .source-dialog-link-list a:focus-visible,
+    .source-dialog-link-list button:hover,
+    .source-dialog-link-list button:focus-visible,
     .related-detail-item button:hover,
     .related-detail-item button:focus-visible {{
       outline: none;
@@ -7091,6 +7096,10 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       'measurement_quality',
       'quantitative_fields_present',
     ];
+    const routeIndex = {{
+      incidents: buildRouteIndex(incidents),
+      documents: buildRouteIndex(documents),
+    }};
 
     function escapeHtml(value) {
       return String(value ?? '')
@@ -7182,6 +7191,46 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
 
     function sourceHref(doc) {
       return doc.original_source_url || doc.source_page_url || doc.source_href || '#';
+    }
+
+    function routeCandidates(doc) {
+      return [
+        doc.source_id,
+        doc.source_document_id && doc.incident_index ? `${doc.source_document_id}::incident-${doc.incident_index}` : '',
+        doc.filename,
+        doc.relative_path,
+        doc.title,
+      ]
+        .filter((value) => typeof value === 'string' && value.trim())
+        .map((value) => value.trim());
+    }
+
+    function routeId(doc) {
+      return routeCandidates(doc)[0] || '';
+    }
+
+    function buildRouteIndex(items) {
+      const index = new Map();
+      items.forEach((doc) => {
+        routeCandidates(doc).forEach((candidate) => {
+          if (!index.has(candidate)) {
+            index.set(candidate, doc);
+          }
+        });
+      });
+      return index;
+    }
+
+    function detailRouteHash(kind, doc) {
+      const id = routeId(doc);
+      if (!id) return '#';
+      return `#${kind === 'documents' ? 'source' : 'incident'}=${encodeURIComponent(id)}`;
+    }
+
+    function detailRouteUrl(kind, doc) {
+      const hash = detailRouteHash(kind, doc);
+      if (hash === '#') return '#';
+      return `${window.location.origin}${window.location.pathname}${window.location.search}${hash}`;
     }
 
     function sourcePreviewLabel(doc) {
@@ -7346,6 +7395,8 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     let sourceDialogReturnFocus = null;
 
     function sourceDialogLinks(doc) {
+      const routeKind = routeIndex.documents.get(routeId(doc)) === doc ? 'documents' : 'incidents';
+      const detailUrl = detailRouteUrl(routeKind, doc);
       const links = [
         ['Open source', sourceHref(doc)],
         ['Original release file', doc.original_source_url],
@@ -7353,11 +7404,38 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         ['Thumbnail image', doc.thumbnail_url],
       ];
       const seen = new Set();
-      const rendered = links
+      const copyLink = detailUrl && detailUrl !== '#'
+        ? `<button type="button" data-copy-detail-url="${escapeHtml(detailUrl)}">Copy Link</button>`
+        : '';
+      const renderedLinks = links
         .filter(([, href]) => href && href !== '#' && !seen.has(href) && seen.add(href))
         .map(([label, href]) => `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`)
         .join('');
+      const rendered = `${copyLink}${renderedLinks}`;
       return rendered ? `<nav class="source-dialog-link-list" aria-label="Source links">${rendered}</nav>` : '';
+    }
+
+    async function copyTextToClipboard(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return;
+        } catch {
+          // Fall through to the older selection-based clipboard path.
+        }
+      }
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) {
+        throw new Error('Clipboard copy failed');
+      }
     }
 
     function sourceDialogMedia(doc) {
@@ -7540,6 +7618,11 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       return renderDetailSection('Incident Reports', `<div class="related-detail-list">${rendered}</div>`);
     }
 
+    function isDialogOpen() {
+      const dialog = document.getElementById('sourceDetailDialog');
+      return Boolean(dialog && dialog.open);
+    }
+
     function renderSourceDialog(doc) {
       const categoryClass = doc.evidence_category_rank === 1
         ? 'category-one'
@@ -7586,11 +7669,34 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         </div>`;
     }
 
-    function openSourceDialog(doc, trigger = null) {
+    function openSourceDialog(doc, trigger = null, options = {}) {
       const dialog = document.getElementById('sourceDetailDialog');
       if (!dialog || !doc) return;
+      const routeKind = options.kind || (routeIndex.documents.get(routeId(doc)) === doc ? 'documents' : 'incidents');
+      if (options.updateHash !== false) {
+        const hash = detailRouteHash(routeKind, doc);
+        if (hash !== '#' && window.location.hash !== hash) {
+          window.history.pushState(null, '', hash);
+        }
+      }
       sourceDialogReturnFocus = trigger || document.activeElement;
       dialog.innerHTML = renderSourceDialog(doc);
+      dialog.querySelectorAll('[data-copy-detail-url]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const url = button.dataset.copyDetailUrl;
+          if (!url) return;
+          const originalText = button.textContent;
+          try {
+            await copyTextToClipboard(url);
+            button.textContent = 'Copied';
+          } catch {
+            button.textContent = 'Copy failed';
+          }
+          window.setTimeout(() => {
+            button.textContent = originalText || 'Copy Link';
+          }, 1600);
+        });
+      });
       dialog.querySelectorAll('[data-dialog-related-search]').forEach((button) => {
         button.addEventListener('click', () => {
           const search = button.dataset.dialogRelatedSearch;
@@ -7603,9 +7709,12 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           const childIndex = Number(button.dataset.dialogChildIndex);
           const childSources = doc.child_sources || [];
           if (!Number.isInteger(childIndex) || !childSources[childIndex]) return;
-          openSourceDialog(childSources[childIndex], button);
+          openSourceDialog(childSources[childIndex], button, { kind: 'incidents' });
         });
       });
+      if (dialog.open) {
+        return;
+      }
       if (typeof dialog.showModal === 'function') {
         dialog.showModal();
       } else {
@@ -7614,14 +7723,77 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     }
 
     function bindSourceDetailButtons() {
-      document.querySelectorAll('[data-register-kind][data-item-index]').forEach((button) => {
-        button.addEventListener('click', () => {
-          const itemIndex = Number(button.dataset.itemIndex);
-          const items = registerItems(button.dataset.registerKind);
-          if (!Number.isInteger(itemIndex) || itemIndex < 0 || !items[itemIndex]) return;
-          openSourceDialog(items[itemIndex], button);
+      document.querySelectorAll('[data-route-kind][data-route-id]').forEach((link) => {
+        link.addEventListener('click', (event) => {
+          event.preventDefault();
+          openDetailRoute(link.dataset.routeKind, link.dataset.routeId, {
+            trigger: link,
+            updateHash: true,
+          });
         });
       });
+    }
+
+    function detailRouteFromHash() {
+      const match = window.location.hash.match(/^#(incident|source)=([^&]+)$/);
+      if (!match) return null;
+      let id = '';
+      try {
+        id = decodeURIComponent(match[2].replace(/\+/g, '%20'));
+      } catch {
+        return null;
+      }
+      return {
+        kind: match[1] === 'source' ? 'documents' : 'incidents',
+        id,
+      };
+    }
+
+    function hasDetailRouteHash() {
+      return /^#(?:incident|source)=/.test(window.location.hash);
+    }
+
+    function clearDetailRouteHash() {
+      if (!hasDetailRouteHash()) return;
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    }
+
+    function findRouteItem(kind, id) {
+      if (!routeIndex[kind] || !id) return null;
+      return routeIndex[kind].get(id) || null;
+    }
+
+    function focusRegisterRow(kind, id) {
+      requestAnimationFrame(() => {
+        const row = [...document.querySelectorAll(`[data-register-row-kind="${kind}"]`)]
+          .find((candidate) => candidate.dataset.routeId === id);
+        row?.scrollIntoView({ block: 'center' });
+      });
+    }
+
+    function openDetailRoute(kind, id, options = {}) {
+      const doc = findRouteItem(kind, id);
+      if (!doc) return false;
+      const items = registerItems(kind);
+      const itemIndex = items.indexOf(doc);
+      Object.assign(registerState(kind), defaultRegisterFilters(kind));
+      if (itemIndex >= 0) {
+        registerState(kind).page = Math.floor(itemIndex / DOCUMENTS_PER_PAGE) + 1;
+      }
+      syncRegisterFilterControls(kind);
+      setActiveTab(kind);
+      focusRegisterRow(kind, routeId(doc));
+      openSourceDialog(doc, options.trigger || null, {
+        kind,
+        updateHash: options.updateHash !== false,
+      });
+      return true;
+    }
+
+    function openDetailRouteFromHash() {
+      const route = detailRouteFromHash();
+      if (!route) return false;
+      return openDetailRoute(route.kind, route.id, { updateHash: false });
     }
 
     function initSourceDialog() {
@@ -7637,7 +7809,16 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           sourceDialogReturnFocus.focus();
         }
         sourceDialogReturnFocus = null;
+        clearDetailRouteHash();
       });
+      const syncDialogWithUrl = () => {
+        const opened = openDetailRouteFromHash();
+        if (!opened && isDialogOpen()) {
+          dialog.close();
+        }
+      };
+      window.addEventListener('hashchange', syncDialogWithUrl);
+      window.addEventListener('popstate', syncDialogWithUrl);
     }
 
     function relatedSourcesSection(doc) {
@@ -8487,7 +8668,8 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         const sourceContext = sourceContextSection(doc);
         const relatedSources = relatedSourcesSection(doc);
         const href = sourceHref(doc);
-        const itemIndex = registerItems(kind).indexOf(doc);
+        const itemRouteId = routeId(doc);
+        const itemRouteHref = detailRouteHash(kind, doc);
         const previewPanel = doc.thumbnail_url
           ? `<details class="source-preview">
               <summary>${escapeHtml(sourcePreviewLabel(doc))}</summary>
@@ -8498,9 +8680,9 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
             </details>`
           : '';
         return `
-          <tr>
+          <tr data-register-row-kind="${kind}" data-route-id="${escapeHtml(itemRouteId)}">
             <td data-label="${isIncidentRegister ? 'Incident' : 'Source'}">
-              <p class="doc-title"><button class="source-title-button" type="button" data-register-kind="${kind}" data-item-index="${itemIndex}" aria-haspopup="dialog">${escapeHtml(doc.title)}</button></p>
+              <p class="doc-title"><a class="source-title-button" href="${escapeHtml(itemRouteHref)}" data-route-kind="${kind}" data-route-id="${escapeHtml(itemRouteId)}" aria-haspopup="dialog">${escapeHtml(doc.title)}</a></p>
               ${previewPanel}
               <div class="tag-row">${tags}</div>
             </td>
@@ -8699,6 +8881,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     initFilters();
     initSourceDialog();
     updateDashboard();
+    openDetailRouteFromHash();
   </script>
 </body>
 </html>
