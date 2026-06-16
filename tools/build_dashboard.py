@@ -55,7 +55,7 @@ SEO_IMAGE_PATH = "assets/hero-classified-saucer.png"
 SEO_FAVICON_PATH = "favicon.svg"
 
 
-DOCUMENT_CACHE_VERSION = 5
+DOCUMENT_CACHE_VERSION = 6
 PAGE_TEXT_CACHE_VERSION = 3
 SOURCE_MANIFEST_VERSION = 1
 EMBEDDING_CACHE_VERSION = 1
@@ -1661,13 +1661,13 @@ def apply_review_override(document: dict[str, object], review: dict[str, object]
   document.setdefault("review_status", "generated")
   document.setdefault("review_source", "scripted_extraction")
   if not review:
-    return annotate_evidence_classification(normalize_document_after_review(ensure_trend_review_fields(document)))
+    return annotate_evidence_classification(normalize_date_role_fields(normalize_document_after_review(ensure_trend_review_fields(document))))
 
   merged = dict(document)
   merged.update(review)
   merged.setdefault("review_status", "reviewed")
   merged.setdefault("review_source", "manual_ai_review")
-  return annotate_evidence_classification(normalize_document_after_review(ensure_trend_review_fields(merged)))
+  return annotate_evidence_classification(normalize_date_role_fields(normalize_document_after_review(ensure_trend_review_fields(merged))))
 
 
 def normalize_document_after_review(document: dict[str, object]) -> dict[str, object]:
@@ -2368,6 +2368,11 @@ class LocalModelReviewer:
     if model_evidence_category is not None:
       review["evidence_category"] = model_evidence_category["label"]
 
+    for date_key in ("incident_date_label", "source_date_label"):
+      date_value = payload.get(date_key)
+      if isinstance(date_value, str) and normalize_space(date_value):
+        review[date_key] = normalize_space(date_value)
+
     review.update(normalize_trend_review_fields(payload))
 
     audio_source = payload.get("audio_source_characterization")
@@ -2446,6 +2451,12 @@ class LocalModelReviewer:
       date_label = raw_incident.get("date_label")
       if isinstance(date_label, str) and normalize_space(date_label):
         incident["date_label"] = normalize_space(date_label)
+        incident["incident_date_label"] = normalize_space(date_label)
+
+      for date_key in ("incident_date_label", "source_date_label"):
+        date_value = raw_incident.get(date_key)
+        if isinstance(date_value, str) and normalize_space(date_value):
+          incident[date_key] = normalize_space(date_value)
 
       visual = raw_incident.get("visual_observations")
       incident["visual_observations"] = normalize_space(visual) if isinstance(visual, str) and normalize_space(visual) else None
@@ -2512,9 +2523,11 @@ class LocalModelReviewer:
         "When a passage says the event was explained or likely mundane, still extract it if it is a concrete report and mark the resolution accordingly. "
         "Return no more than "
         f"{INCIDENT_EXTRACTION_MAX_INCIDENTS_PER_CHUNK} incidents for this chunk, prioritizing the most specific accounts.\n\n"
-        "Return only a JSON object with key incidents. Each incident must include: title, incident_number, start_page, end_page, date_label, location_label, summary_narrative, visual_observations, document_type, themes, agencies, evidence_category, "
+        "Return only a JSON object with key incidents. Each incident must include: title, incident_number, start_page, end_page, date_label, incident_date_label, source_date_label, location_label, summary_narrative, visual_observations, document_type, themes, agencies, evidence_category, "
         f"{', '.join(TREND_FIELD_NAMES)}. "
         "incident_number may be null when none is stated. start_page and end_page must be source PDF page numbers from this chunk. "
+        "date_label and incident_date_label must be the date when the described sighting/event happened, not the memo, report, release, or filing date; use null if the event date is not stated. "
+        "source_date_label must be the date of the source document/report/memo/summary sheet when stated separately from the event date; use null if only the event date is stated. "
         "title should be concise and specific, not just the parent filename. summary_narrative must be 2 to 4 sentences and must state what happened, who reported it when known, where it happened when known, and whether the source presents an explanation. "
         f"document_type must be one of {sorted(DOCUMENT_TYPE_LABELS)}; use Incident Summary, Research File, Debrief / Reporting Form, Archival File, or Transcript as appropriate. "
         f"themes must be chosen only from {sorted(THEME_KEYWORDS)}. "
@@ -2572,7 +2585,7 @@ class LocalModelReviewer:
       "The extracted text may contain OCR noise. Use the text and any attached page images to infer what is actually present. "
       "Keep the document's general overview, but prioritize identifying any concrete UAP/UFO activity, sightings, incidents, or explicit lack of such activity. "
       "If the document is large or compiled from multiple items, synthesize systematically from the full sample instead of over-weighting the opening page. "
-      "Return only a JSON object with these keys: summary_narrative, visual_observations, document_type, themes, agencies, location_label, evidence_category, "
+      "Return only a JSON object with these keys: summary_narrative, visual_observations, document_type, themes, agencies, location_label, incident_date_label, source_date_label, evidence_category, "
       f"{', '.join(TREND_FIELD_NAMES)}. "
       f"document_type must be one of {sorted(DOCUMENT_TYPE_LABELS)}. "
       f"themes must be chosen only from {sorted(THEME_KEYWORDS)}. "
@@ -2582,6 +2595,7 @@ class LocalModelReviewer:
       "Category Three is for reports with little meaningful evidence or very sparse eyewitness support. "
       "agencies should be a short array of specific organizations supported by the material, not guesses. "
       "location_label should be a short place name if the material makes one reasonably clear, otherwise null. "
+      "incident_date_label is the date when the described UAP/UFO event happened; source_date_label is the date of the report, memo, correspondence, release, or source document. Use null for either when not stated, and do not put a document date in incident_date_label. "
       "summary_narrative must be 4 sentences covering who, the document's overall subject, where, and significance. "
       "Within those 4 sentences, explicitly state what UAP/UFO activity is described, where in the document it appears if that can be inferred from the sampled pages or sections, and say clearly when no actual UAP/UFO activity is present. "
       "visual_observations should describe only visible imagery or scene evidence and be null when there is no meaningful visual evidence beyond text formatting.\n\n"
@@ -2641,11 +2655,12 @@ class LocalModelReviewer:
       "For videos, the attached frames are samples from the clip; describe visible objects, sensor overlays, scene context, apparent motion cues only when the frames support them, and any uncertainty. "
       "When transcript text is provided, use it as evidence for audible narration, cockpit audio, captions, or spoken context, while still separating what is visible from what is spoken. "
       "Do not invent conclusions about identity, speed, altitude, intent, or authenticity. "
-      "Return only a JSON object with these keys: summary_narrative, visual_observations, document_type, themes, agencies, location_label, evidence_category, audio_source_characterization, audio_transcript_summary, "
+      "Return only a JSON object with these keys: summary_narrative, visual_observations, document_type, themes, agencies, location_label, incident_date_label, source_date_label, evidence_category, audio_source_characterization, audio_transcript_summary, "
       f"{', '.join(TREND_FIELD_NAMES)}. "
       f"document_type must be one of {sorted(DOCUMENT_TYPE_LABELS)}. "
       f"themes must be chosen only from {sorted(THEME_KEYWORDS)}. "
       f"evidence_category must be one of {[definition['label'] for definition in EVIDENCE_CATEGORY_DEFINITIONS]}. "
+      "incident_date_label is the date when the depicted or described event happened; source_date_label is the date of the media asset, report, posting, or release when stated separately. Use null for either when not stated. "
       "summary_narrative must be 4 sentences covering who or source context, what is visible or audible in the asset, where, and significance. "
       "visual_observations must be a concrete visual narrative of what is actually visible in the attached media, not a restatement of the manifest. "
       "audio_source_characterization must be a short LLM-generated phrase describing the actual kind of audio source, such as mission radio transmission, cockpit intercom, recorded interview, press briefing narration, or archival mission audio; use null when no transcript text is provided. "
@@ -2939,6 +2954,99 @@ def parse_manifest_date_label(value: str) -> str | None:
     if parsed.day == 1 and not re.search(r"\b\d{1,2}\b", cleaned.replace(str(parsed.year), "")):
         return parsed.strftime("%b %Y")
     return parsed.strftime("%b %d, %Y")
+
+
+def year_info_from_date_label(value: object) -> tuple[int | None, int | None, int | None]:
+    if not isinstance(value, str):
+        return None, None, None
+    cleaned = normalize_space(value)
+    if not cleaned:
+        return None, None, None
+
+    year_start, year_end, primary_year = extract_year_info(cleaned)
+    if primary_year is not None:
+        return year_start, year_end, primary_year
+
+    try:
+        parsed = date_parser.parse(cleaned, fuzzy=True, default=datetime(1900, 1, 1))
+    except (ValueError, OverflowError):
+        return None, None, None
+    if parsed.year == 1900:
+        return None, None, None
+    if parsed.year > datetime.utcnow().year + 1:
+        parsed = parsed.replace(year=parsed.year - 100)
+    if parsed.year < 1930:
+        return None, None, None
+    return parsed.year, parsed.year, parsed.year
+
+
+def date_label_from_metadata(source_metadata: dict[str, object] | None, *keys: str) -> str | None:
+    if not source_metadata:
+        return None
+    for key in keys:
+        value = manifest_text(source_metadata, key)
+        if not value:
+            continue
+        label = parse_manifest_date_label(value)
+        if label:
+            return label
+    return None
+
+
+def apply_year_fields(document: dict[str, object], prefix: str, label: object) -> None:
+    year_start, year_end, primary_year = year_info_from_date_label(label)
+    if primary_year is None:
+        return
+    document[f"{prefix}_year"] = primary_year
+    document[f"{prefix}_year_start"] = year_start
+    document[f"{prefix}_year_end"] = year_end
+
+
+def normalize_date_role_fields(document: dict[str, object]) -> dict[str, object]:
+    for key in ("incident_date_label", "source_date_label", "release_date_label"):
+        value = document.get(key)
+        if isinstance(value, str):
+            document[key] = normalize_space(value) or None
+
+    legacy_date_label = document.get("date_label")
+    if isinstance(legacy_date_label, str):
+        legacy_date_label = normalize_space(legacy_date_label) or None
+    else:
+        legacy_date_label = None
+
+    if not document.get("incident_date_label"):
+        document["incident_date_label"] = legacy_date_label
+    if not document.get("source_date_label"):
+        document["source_date_label"] = legacy_date_label
+
+    incident_date_label = document.get("incident_date_label")
+    source_date_label = document.get("source_date_label")
+    if incident_date_label:
+        document["date_label"] = incident_date_label
+    elif source_date_label:
+        document["date_label"] = source_date_label
+
+    if incident_date_label:
+        apply_year_fields(document, "incident", incident_date_label)
+        incident_year = document.get("incident_year")
+        if isinstance(incident_year, int):
+            document["year"] = incident_year
+            document["year_start"] = document.get("incident_year_start")
+            document["year_end"] = document.get("incident_year_end")
+    elif source_date_label and not isinstance(document.get("year"), int):
+        apply_year_fields(document, "source", source_date_label)
+        source_year = document.get("source_year")
+        if isinstance(source_year, int):
+            document["year"] = source_year
+            document["year_start"] = document.get("source_year_start")
+            document["year_end"] = document.get("source_year_end")
+
+    if source_date_label:
+        apply_year_fields(document, "source", source_date_label)
+    if document.get("release_date_label"):
+        apply_year_fields(document, "release", document.get("release_date_label"))
+
+    return document
 
 
 def choose_excerpt(text: str, max_length: int = 320) -> str:
@@ -3782,14 +3890,23 @@ def build_pdf_document_from_pages(
     combined_text = pages_combined_text(pages)
     base_title = slug_title(path.stem)
     title = f"{title_prefix} - {base_title}" if title_prefix else base_title
-    date_label = extract_date_label(title) or extract_date_label(combined_text[:1200])
+    detected_date_label = extract_date_label(title) or extract_date_label(combined_text[:1200])
+    manifest_incident_date_label = date_label_from_metadata(source_metadata, "incident_date")
+    release_date_label = date_label_from_metadata(source_metadata, "release_date", "date_published")
+    source_date_label = manifest_incident_date_label or detected_date_label
+    incident_date_label = detected_date_label if segment_kind in {"incident_summary", "incident_account"} else manifest_incident_date_label or detected_date_label
+    date_label = incident_date_label
     title_year_start, title_year_end, title_primary_year = extract_year_info(title)
-    if title_year_start is not None:
-        year_start, year_end, primary_year = title_year_start, title_year_end, title_primary_year
-    elif date_label:
-        year_start, year_end, primary_year = extract_year_info(date_label)
+    if date_label:
+        year_start, year_end, primary_year = year_info_from_date_label(date_label)
     else:
+        year_start, year_end, primary_year = None, None, None
+    if primary_year is None and title_year_start is not None:
+        year_start, year_end, primary_year = title_year_start, title_year_end, title_primary_year
+    elif primary_year is None:
         year_start, year_end, primary_year = extract_year_info(combined_text[:1200])
+    source_year_start, source_year_end, source_primary_year = year_info_from_date_label(source_date_label)
+    release_year_start, release_year_end, release_primary_year = year_info_from_date_label(release_date_label)
     document_type = "Incident Summary" if segment_kind == "incident_summary" else infer_document_type(title)
     observation = choose_excerpt(combined_text)
     location = resolver.resolve(title, observation)
@@ -3825,6 +3942,18 @@ def build_pdf_document_from_pages(
         "source_href": source_href,
         "document_type": document_type,
         "date_label": date_label,
+        "incident_date_label": incident_date_label,
+        "incident_year": primary_year,
+        "incident_year_start": year_start,
+        "incident_year_end": year_end,
+        "source_date_label": source_date_label,
+        "source_year": source_primary_year,
+        "source_year_start": source_year_start,
+        "source_year_end": source_year_end,
+        "release_date_label": release_date_label,
+        "release_year": release_primary_year,
+        "release_year_start": release_year_start,
+        "release_year_end": release_year_end,
         "year": primary_year,
         "year_start": year_start,
         "year_end": year_end,
@@ -3928,6 +4057,27 @@ def build_child_document_from_extracted_incident(
     return apply_review_override(document, review)
 
 
+def saved_child_incidents_from_reviews(
+    parent_source_id: str,
+    review_overrides: dict[str, dict[str, object]],
+) -> list[tuple[int, dict[str, object]]]:
+    incidents: list[tuple[int, dict[str, object]]] = []
+    prefix = f"{parent_source_id}#account-"
+    for source_id, review in review_overrides.items():
+      if not source_id.startswith(prefix) or not isinstance(review, dict):
+        continue
+      match = re.search(r"#account-(\d+)(?:-pages-(\d+)-(\d+))?", source_id)
+      if not match:
+        continue
+      index = int(match.group(1))
+      incident = dict(review)
+      if match.group(2) and match.group(3):
+        incident["start_page"] = int(match.group(2))
+        incident["end_page"] = int(match.group(3))
+      incidents.append((index, incident))
+    return sorted(incidents, key=lambda item: item[0])
+
+
 def analyze_document(
     path: Path,
     resolver: PlaceResolver,
@@ -3977,7 +4127,9 @@ def analyze_document(
 
       child_documents: list[dict[str, object]] = []
       extracted_incidents = reviewer.extract_incident_reports(parent_document, extraction.pages, resolver) if reviewer is not None else []
-      for index, incident in enumerate(extracted_incidents, start=1):
+      saved_incidents = saved_child_incidents_from_reviews(parent_source_id, review_overrides) if not extracted_incidents else []
+      incident_items = list(enumerate(extracted_incidents, start=1)) if extracted_incidents else saved_incidents
+      for index, incident in incident_items:
         child_document = build_child_document_from_extracted_incident(
             path=path,
             source_dir=source_dir,
@@ -3992,7 +4144,7 @@ def analyze_document(
         review_overrides[str(child_document["source_id"])] = {
           key: value
           for key, value in child_document.items()
-          if key in {"title", "summary_narrative", "visual_observations", "document_type", "themes", "agencies", "location", "evidence_category", "review_status", "review_source", *TREND_FIELD_NAMES}
+          if key in {"title", "summary_narrative", "visual_observations", "document_type", "themes", "agencies", "location", "date_label", "incident_date_label", "source_date_label", "release_date_label", "evidence_category", "review_status", "review_source", *TREND_FIELD_NAMES}
         }
         child_documents.append(child_document)
 
@@ -4155,18 +4307,28 @@ def analyze_media_item(
             if item
         )
     )
-    date_label = (
-        next((label for label in (parse_manifest_date_label(source) for source in date_sources) if label), None)
+    incident_date_label = (
+        date_label_from_metadata(source_metadata, "incident_date", "date_taken")
         or extract_date_label(title)
         or extract_date_label(combined_text)
     )
+    source_date_label = (
+        date_label_from_metadata(source_metadata, "date_taken", "date_published", "incident_date")
+        or incident_date_label
+    )
+    release_date_label = date_label_from_metadata(source_metadata, "release_date", "date_published")
+    date_label = incident_date_label
     title_year_start, title_year_end, title_primary_year = extract_year_info(title)
-    if title_year_start is not None:
-      year_start, year_end, primary_year = title_year_start, title_year_end, title_primary_year
-    elif date_label:
-      year_start, year_end, primary_year = extract_year_info(date_label)
+    if date_label:
+      year_start, year_end, primary_year = year_info_from_date_label(date_label)
     else:
+      year_start, year_end, primary_year = None, None, None
+    if primary_year is None and title_year_start is not None:
+      year_start, year_end, primary_year = title_year_start, title_year_end, title_primary_year
+    elif primary_year is None:
       year_start, year_end, primary_year = extract_year_info(combined_text)
+    source_year_start, source_year_end, source_primary_year = year_info_from_date_label(source_date_label)
+    release_year_start, release_year_end, release_primary_year = year_info_from_date_label(release_date_label)
 
     observation = choose_excerpt(narrative or extracted_text or combined_text)
     location = resolver.resolve(location_source) if location_source else None
@@ -4205,6 +4367,18 @@ def analyze_media_item(
         "source_page_url": manifest_text(source_metadata, "source_page_url") or None,
         "document_type": document_type,
         "date_label": date_label,
+        "incident_date_label": incident_date_label,
+        "incident_year": primary_year,
+        "incident_year_start": year_start,
+        "incident_year_end": year_end,
+        "source_date_label": source_date_label,
+        "source_year": source_primary_year,
+        "source_year_start": source_year_start,
+        "source_year_end": source_year_end,
+        "release_date_label": release_date_label,
+        "release_year": release_primary_year,
+        "release_year_start": release_year_start,
+        "release_year_end": release_year_end,
         "year": primary_year,
         "year_start": year_start,
         "year_end": year_end,
@@ -4594,22 +4768,35 @@ def build_incident_documents(documents: list[dict[str, object]]) -> list[dict[st
 
       if children:
         for incident_index, child in enumerate(children, start=1):
-          incident = dict(child)
+          incident = normalize_date_role_fields(dict(child))
           incident.setdefault("incident_count", 1)
           incident["source_document_title"] = document.get("title")
           incident["source_document_id"] = document.get("source_id")
           incident["source_document_filename"] = document.get("filename")
           incident["source_document_relative_path"] = document.get("relative_path")
+          for key in (
+            "source_date_label",
+            "source_year",
+            "source_year_start",
+            "source_year_end",
+            "release_date_label",
+            "release_year",
+            "release_year_start",
+            "release_year_end",
+          ):
+            if incident.get(key) is None and document.get(key) is not None:
+              incident[key] = document.get(key)
           incident["source_document_index"] = source_index
           incident["source_document_incident_count"] = len(children)
           incident["incident_index"] = incident_index
+          incident = normalize_date_role_fields(incident)
           incidents.append(incident)
         continue
 
       if not is_single_incident_document(document):
         continue
 
-      incident = dict(document)
+      incident = normalize_date_role_fields(dict(document))
       incident.pop("child_sources", None)
       incident["source_document_title"] = document.get("title")
       incident["source_document_id"] = document.get("source_id")
@@ -5070,6 +5257,8 @@ def attach_related_sources(
             "original_source_url": other.get("original_source_url"),
             "source_page_url": other.get("source_page_url"),
             "year": other.get("year"),
+            "incident_date_label": other.get("incident_date_label"),
+            "source_date_label": other.get("source_date_label"),
             "document_type": other.get("document_type"),
             "evidence_category": other.get("evidence_category"),
             "similarity": round(score, 4),
@@ -5097,12 +5286,16 @@ def build_analysis(
     executive_summary: dict[str, object] | None = None,
     related_source_stats: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    documents = [annotate_document_tree(document) for document in documents]
+    documents = [annotate_document_tree(normalize_date_role_fields(document)) for document in documents]
     incident_documents = [annotate_document_tree(document) for document in build_incident_documents(documents)]
     public_documents = [sanitize_dashboard_document(document) for document in documents]
     public_incidents = [sanitize_dashboard_document(document) for document in incident_documents]
     public_executive_summary = sanitize_dashboard_value(executive_summary) if executive_summary else None
-    source_years = [doc["year"] for doc in documents if isinstance(doc.get("year"), int)]
+    source_years = [
+      doc["source_year"] if isinstance(doc.get("source_year"), int) else doc["year"]
+      for doc in documents
+      if isinstance(doc.get("source_year"), int) or isinstance(doc.get("year"), int)
+    ]
     analysis_documents = incident_documents
     year_counts = Counter(doc["year"] for doc in analysis_documents if isinstance(doc.get("year"), int))
     type_counts = Counter(doc["document_type"] for doc in analysis_documents)
@@ -6003,9 +6196,9 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       font-size: 0.94rem;
     }}
 
-    th:nth-child(1) {{ width: 28%; }}
-    th:nth-child(2) {{ width: 22%; }}
-    th:nth-child(3) {{ width: 20%; }}
+    th:nth-child(1) {{ width: 27%; }}
+    th:nth-child(2) {{ width: 18%; }}
+    th:nth-child(3) {{ width: 25%; }}
     th:nth-child(4) {{ width: 30%; }}
 
     th,
@@ -6139,8 +6332,53 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       letter-spacing: 0.04em;
     }}
 
-    .profile-text {{
+    .profile-stack {{
+      display: grid;
+      gap: 8px;
       color: #d6dce7;
+      font-size: 0.84rem;
+      line-height: 1.35;
+    }}
+
+    .profile-row {{
+      display: grid;
+      grid-template-columns: minmax(64px, max-content) minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+    }}
+
+    .profile-label {{
+      color: var(--gold);
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      padding-top: 2px;
+    }}
+
+    .profile-value {{
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }}
+
+    .profile-chip-row {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }}
+
+    .profile-chip {{
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      border: 1px solid rgba(244, 239, 225, 0.12);
+      background: rgba(244, 239, 225, 0.045);
+      color: #cbd6e2;
+      padding: 3px 7px;
+      font-size: 0.73rem;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
     }}
 
     .related-sources {{
@@ -7025,8 +7263,33 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     const DOCUMENTS_PER_PAGE = 10;
     const analysis = JSON.parse(document.getElementById('analysis-data').textContent);
     const worldLand = JSON.parse(document.getElementById('world-land-data').textContent);
-    const documents = analysis.documents.slice().sort((a, b) => (b.year || 0) - (a.year || 0) || a.title.localeCompare(b.title));
-    const incidents = (analysis.incidents || []).slice().sort((a, b) => (b.year || 0) - (a.year || 0) || a.title.localeCompare(b.title));
+    function incidentYear(doc) {
+      return doc.incident_year || doc.year || doc.year_start || doc.year_end;
+    }
+
+    function sourceYear(doc) {
+      return doc.source_year || doc.source_year_start || doc.source_year_end || doc.year || doc.year_start || doc.year_end;
+    }
+
+    function incidentDateLabel(doc) {
+      return doc.incident_date_label || doc.date_label || incidentYear(doc);
+    }
+
+    function sourceDateLabel(doc) {
+      return doc.source_date_label || sourceYear(doc);
+    }
+
+    function releaseDateLabel(doc) {
+      return doc.release_date_label || doc.release_year;
+    }
+
+    function dateLabelsDiffer(a, b) {
+      if (!a || !b) return false;
+      return String(a).toLowerCase() !== String(b).toLowerCase();
+    }
+
+    const documents = analysis.documents.slice().sort((a, b) => (sourceYear(b) || 0) - (sourceYear(a) || 0) || a.title.localeCompare(b.title));
+    const incidents = (analysis.incidents || []).slice().sort((a, b) => (incidentYear(b) || 0) - (incidentYear(a) || 0) || a.title.localeCompare(b.title));
     const defaultYearMin = analysis.year_min || analysis.source_year_min || 1900;
     const defaultYearMax = analysis.year_max || analysis.source_year_max || new Date().getFullYear();
     const defaultSourceYearMin = analysis.source_year_min || analysis.year_min || 1900;
@@ -7477,11 +7740,16 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
     }
 
     function sourceDialogOverviewRows(doc) {
+      const incidentDate = incidentDateLabel(doc);
+      const sourceDate = sourceDateLabel(doc);
+      const releaseDate = releaseDateLabel(doc);
       return renderDetailRows([
         ['Document type', doc.document_type],
         ['Media type', doc.media_type || 'pdf'],
         ['Source document', doc.source_document_title],
-        ['Date', doc.date_label || doc.year || doc.year_start || doc.year_end],
+        ['Incident date', incidentDate],
+        ['Source/document date', dateLabelsDiffer(sourceDate, incidentDate) ? sourceDate : null],
+        ['Release date', dateLabelsDiffer(releaseDate, sourceDate) && dateLabelsDiffer(releaseDate, incidentDate) ? releaseDate : null],
         ['Location', doc.location],
         ['Media profile', mediaProfileText(doc)],
         ['Extraction', formatExtractionMethod(doc.extraction_method)],
@@ -7603,7 +7871,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
         const pageLabel = pages.length === 2 && pages[0] !== pages[1]
           ? `pages ${pages[0]}-${pages[1]}`
           : pages.length ? `page ${pages[0]}` : '';
-        const metadata = [child.document_type, child.date_label || child.year, child.location ? child.location.label : '', pageLabel, child.evidence_category]
+        const metadata = [child.document_type, incidentDateLabel(child), child.location ? child.location.label : '', pageLabel, child.evidence_category]
           .filter(Boolean)
           .join(' · ');
         return `
@@ -7855,7 +8123,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
       const filters = registerState(kind);
       const search = filters.search.trim().toLowerCase();
       return registerItems(kind).filter((doc) => {
-        const year = doc.year || doc.year_start || doc.year_end;
+        const year = kind === 'documents' ? sourceYear(doc) : incidentYear(doc);
         if (filters.type !== 'all' && doc.document_type !== filters.type) return false;
         if (filters.category !== 'all' && doc.evidence_category !== filters.category) return false;
         if (filters.capability !== 'all' && !(doc.capability_keys || []).includes(filters.capability)) return false;
@@ -8655,16 +8923,48 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
           .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
           .join('');
         const mediaProfile = mediaProfileText(doc);
-        const profile = [
-          doc.date_label || (doc.year ? `${doc.year}` : 'Undated'),
-          doc.location ? doc.location.label : 'No location resolved',
-          isIncidentRegister && doc.source_document_title ? `Source: ${doc.source_document_title}` : '',
-          mediaProfile,
+        const incidentDate = incidentDateLabel(doc);
+        const sourceDate = sourceDateLabel(doc);
+        const releaseDate = releaseDateLabel(doc);
+        const dateItems = isIncidentRegister
+          ? [
+              incidentDate ? `Incident ${incidentDate}` : 'Incident undated',
+              dateLabelsDiffer(sourceDate, incidentDate) ? `Source ${sourceDate}` : '',
+            ]
+          : [
+              sourceDate ? `Source ${sourceDate}` : 'Source undated',
+              dateLabelsDiffer(incidentDate, sourceDate) ? `Incident ${incidentDate}` : '',
+              dateLabelsDiffer(releaseDate, sourceDate) && dateLabelsDiffer(releaseDate, incidentDate) ? `Release ${releaseDate}` : '',
+            ];
+        const evidenceItems = [
           doc.capability_profile && doc.capability_profile !== 'No capability label' ? doc.capability_profile : '',
+          doc.review_status === 'reviewed' ? 'Reviewed narrative' : '',
+        ];
+        const processingItems = [
+          mediaProfile,
           (doc.media_type || 'pdf') === 'pdf' ? (doc.ocr_pages ? `${doc.ocr_pages} OCR pages` : 'Native text') : doc.extraction_method.replace('_', ' '),
           doc.ocr_skipped_pages ? `${doc.ocr_skipped_pages} OCR pages deferred` : '',
-          doc.review_status === 'reviewed' ? 'Reviewed narrative' : '',
-        ].filter(Boolean).join(' · ');
+        ];
+        const profileRow = (label, value) => value
+          ? `<div class="profile-row"><span class="profile-label">${escapeHtml(label)}</span><span class="profile-value">${escapeHtml(value)}</span></div>`
+          : '';
+        const profileChipRow = (label, values) => {
+          const chips = values
+            .filter(Boolean)
+            .map((value) => `<span class="profile-chip">${escapeHtml(value)}</span>`)
+            .join('');
+          return chips
+            ? `<div class="profile-row"><span class="profile-label">${escapeHtml(label)}</span><span class="profile-value profile-chip-row">${chips}</span></div>`
+            : '';
+        };
+        const profile = `
+          <div class="profile-stack">
+            ${profileChipRow('Dates', dateItems)}
+            ${profileRow('Place', doc.location ? doc.location.label : 'No location resolved')}
+            ${isIncidentRegister && doc.source_document_title ? profileRow('Source', doc.source_document_title) : ''}
+            ${profileChipRow('Evidence', evidenceItems)}
+            ${profileChipRow('Process', processingItems)}
+          </div>`;
         const sourceContext = sourceContextSection(doc);
         const relatedSources = relatedSourcesSection(doc);
         const href = sourceHref(doc);
@@ -8690,7 +8990,7 @@ def render_dashboard_html(analysis: dict[str, object], site_url: str = DEFAULT_S
               <span class="classification-badge ${categoryClass}">${escapeHtml(doc.evidence_category || 'Category Three')}</span>
               <div class="muted">${escapeHtml(doc.evidence_category_description || '')}</div>
             </td>
-            <td data-label="Profile"><div class="profile-text">${escapeHtml(profile)}</div>${relatedSources}</td>
+            <td data-label="Profile">${profile}${relatedSources}</td>
             <td data-label="Summary Narrative">${escapeHtml(doc.summary_narrative || 'No summary narrative available.')}${sourceContext}</td>
           </tr>`;
       }).join('');
