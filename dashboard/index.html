@@ -603,6 +603,85 @@
       pointer-events: none;
     }
 
+    .network-3d-wrap {
+      position: relative;
+      min-height: 420px;
+      overflow: hidden;
+      border: 1px solid rgba(244, 239, 225, 0.1);
+      background:
+        linear-gradient(rgba(86, 214, 201, 0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(214, 168, 79, 0.06) 1px, transparent 1px),
+        radial-gradient(circle at 50% 42%, rgba(86, 214, 201, 0.13), transparent 56%),
+        rgba(7, 8, 11, 0.48);
+      background-size: 22px 22px, 22px 22px, auto, auto;
+    }
+
+    .network-3d-canvas {
+      display: block;
+      width: 100%;
+      height: 420px;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    .network-3d-canvas:active {
+      cursor: grabbing;
+    }
+
+    .network-3d-canvas:focus-visible {
+      outline: 2px solid rgba(86, 214, 201, 0.8);
+      outline-offset: -3px;
+    }
+
+    .network-3d-hud {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      max-width: calc(100% - 24px);
+      pointer-events: none;
+    }
+
+    .network-3d-hud span {
+      border: 1px solid rgba(244, 239, 225, 0.14);
+      background: rgba(7, 8, 11, 0.68);
+      color: var(--muted);
+      padding: 5px 7px;
+      font-size: 0.64rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .network-3d-tooltip {
+      position: absolute;
+      left: 0;
+      top: 0;
+      z-index: 2;
+      width: min(280px, calc(100% - 24px));
+      transform: translate(-50%, calc(-100% - 12px));
+      border: 1px solid rgba(86, 214, 201, 0.34);
+      background: rgba(9, 12, 17, 0.94);
+      color: #dce6ef;
+      padding: 9px 10px;
+      font-size: 0.78rem;
+      line-height: 1.42;
+      pointer-events: none;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+    }
+
+    .network-3d-tooltip strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+      overflow-wrap: anywhere;
+    }
+
+    .network-3d-tooltip[hidden] {
+      display: none;
+    }
+
     .chart-note,
     .muted { color: var(--muted); }
 
@@ -1862,6 +1941,10 @@
           yearMax: defaultSourceYearMax,
         },
       },
+    };
+    const relatedNetworkState = {
+      frame: null,
+      cleanup: null,
     };
     const chartColors = {
       ink: '#f4efe1',
@@ -3232,6 +3315,14 @@
 
     function renderRelatedSourceNetwork(items) {
       const node = document.getElementById('relatedSourceNetwork');
+      if (relatedNetworkState.frame) {
+        cancelAnimationFrame(relatedNetworkState.frame);
+        relatedNetworkState.frame = null;
+      }
+      if (relatedNetworkState.cleanup) {
+        relatedNetworkState.cleanup();
+        relatedNetworkState.cleanup = null;
+      }
       const byKey = new Map();
       items.forEach((doc) => {
         [doc.title, doc.filename].filter(Boolean).forEach((key) => byKey.set(key, doc));
@@ -3250,7 +3341,7 @@
           const similarity = typeof related.similarity === 'number' ? related.similarity : 0;
           const previous = edgeMap.get(pair);
           if (!previous || similarity > previous.similarity) {
-            edgeMap.set(pair, { sourceKey, targetKey, similarity });
+            edgeMap.set(pair, { sourceKey, targetKey, similarity, sourceDoc: doc, targetDoc: target });
           }
           degree.set(sourceKey, (degree.get(sourceKey) || 0) + 1);
           degree.set(targetKey, (degree.get(targetKey) || 0) + 1);
@@ -3268,55 +3359,294 @@
       const edges = [...edgeMap.values()]
         .filter((edge) => selected.has(edge.sourceKey) && selected.has(edge.targetKey))
         .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, 90);
-      const width = Math.max(node.clientWidth || 420, 420);
-      const height = 380;
-      const centerX = width / 2;
-      const centerY = height / 2;
-      const maxRadius = Math.min(width, height) * 0.42;
-      const minRadius = Math.min(width, height) * 0.19;
+        .slice(0, 110);
       const maxDegree = Math.max(...nodeDocs.map((doc) => degree.get(doc.title || doc.filename) || 1), 1);
-      const positions = new Map();
-      nodeDocs.forEach((doc, index) => {
-        const rank = doc.evidence_category_rank || 3;
-        const radius = minRadius + ((rank - 1) / 2) * (maxRadius - minRadius);
-        const angle = -Math.PI / 2 + (index / nodeDocs.length) * Math.PI * 2;
-        positions.set(doc.title || doc.filename, {
-          x: centerX + Math.cos(angle) * radius,
-          y: centerY + Math.sin(angle) * radius,
-        });
-      });
-      const edgeLayer = edges.map((edge) => {
-        const source = positions.get(edge.sourceKey);
-        const target = positions.get(edge.targetKey);
-        if (!source || !target) return '';
-        const opacity = Math.min(0.64, 0.12 + edge.similarity * 0.56);
-        return `<line x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}" stroke="rgba(86,214,201,${opacity.toFixed(2)})" stroke-width="${Math.max(0.8, edge.similarity * 1.8).toFixed(2)}"></line>`;
-      }).join('');
-      const nodeLayer = nodeDocs.map((doc, index) => {
+      const networkNodes = nodeDocs.map((doc, index) => {
         const key = doc.title || doc.filename;
-        const position = positions.get(key);
+        const rank = doc.evidence_category_rank || 3;
+        const angle = (index / nodeDocs.length) * Math.PI * 2;
+        const bandIndex = Math.max(0, Math.min(2, rank - 1));
+        const radius = 88 + bandIndex * 54 + ((index % 5) - 2) * 6;
+        const z = (2 - bandIndex) * 92 - 92;
         const docDegree = degree.get(key) || 1;
-        const radius = 4 + (docDegree / maxDegree) * 9;
-        const color = categoryPalette[doc.evidence_category] || chartColors.blue;
-        const label = `${doc.title || doc.filename} · ${doc.evidence_category || 'Unclassified'} · ${docDegree} links`;
-        return `
-          <g class="chart-click-target" data-search="${escapeHtml(key)}" role="button" tabindex="0" aria-label="Search incidents for ${escapeHtml(doc.title || doc.filename)}">
-            <circle cx="${position.x}" cy="${position.y}" r="${radius}" fill="${color}" opacity="0.86" stroke="rgba(244,239,225,0.22)">
-              <title>${escapeHtml(label)}</title>
-            </circle>
-          </g>`;
-      }).join('');
+        return {
+          key,
+          doc,
+          degree: docDegree,
+          radius: 4.5 + (docDegree / maxDegree) * 8.5,
+          color: categoryPalette[doc.evidence_category] || chartColors.blue,
+          label: `${doc.title || doc.filename} · ${doc.evidence_category || 'Unclassified'} · ${docDegree} links`,
+          base: {
+            x: Math.cos(angle) * radius,
+            y: Math.sin(angle) * radius * 0.62,
+            z,
+          },
+          projected: null,
+        };
+      });
+      const networkNodeMap = new Map(networkNodes.map((entry) => [entry.key, entry]));
+      const networkEdges = edges
+        .map((edge) => ({
+          ...edge,
+          source: networkNodeMap.get(edge.sourceKey),
+          target: networkNodeMap.get(edge.targetKey),
+        }))
+        .filter((edge) => edge.source && edge.target);
+      const topLabels = new Set(networkNodes.slice().sort((a, b) => b.degree - a.degree).slice(0, 6).map((entry) => entry.key));
       node.innerHTML = `
-        <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img">
-          <circle cx="${centerX}" cy="${centerY}" r="${minRadius}" fill="none" stroke="rgba(200,78,83,0.18)"></circle>
-          <circle cx="${centerX}" cy="${centerY}" r="${(minRadius + maxRadius) / 2}" fill="none" stroke="rgba(214,168,79,0.16)"></circle>
-          <circle cx="${centerX}" cy="${centerY}" r="${maxRadius}" fill="none" stroke="rgba(86,214,201,0.14)"></circle>
-          ${edgeLayer}
-          ${nodeLayer}
-        </svg>
+        <div class="network-3d-wrap">
+          <canvas class="network-3d-canvas" tabindex="0" role="img" aria-label="Animated 3D related-source network. Click a node to filter the incident register."></canvas>
+          <div class="network-3d-hud" aria-hidden="true">
+            <span>${networkNodes.length} nodes</span>
+            <span>${networkEdges.length} links</span>
+            <span>depth = evidence class</span>
+          </div>
+          <div class="network-3d-tooltip" hidden></div>
+        </div>
         ${chartLegend((analysis.evidence_category_counts || []).map((category) => ({ label: category.label, color: categoryPalette[category.label] || chartColors.blue })))}`;
-      bindChartFilterTargets('#relatedSourceNetwork [data-search]', (element) => openDocumentsWithFilters({ search: element.dataset.search }));
+      const canvas = node.querySelector('canvas');
+      const tooltip = node.querySelector('.network-3d-tooltip');
+      const context = canvas.getContext('2d');
+      const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      let width = 0;
+      let height = 0;
+      let dpr = 1;
+      let rotationY = -0.48;
+      let rotationX = 0.34;
+      let hovered = null;
+      let pointer = null;
+      let dragging = false;
+      let lastPointer = null;
+      let startPointer = null;
+      let dragDistance = 0;
+
+      function rgba(hex, alpha) {
+        const value = hex.replace('#', '');
+        const red = parseInt(value.slice(0, 2), 16);
+        const green = parseInt(value.slice(2, 4), 16);
+        const blue = parseInt(value.slice(4, 6), 16);
+        return `rgba(${red},${green},${blue},${alpha})`;
+      }
+
+      function resizeCanvas() {
+        const bounds = canvas.getBoundingClientRect();
+        width = Math.max(420, Math.floor(bounds.width || node.clientWidth || 420));
+        height = Math.max(360, Math.floor(bounds.height || 420));
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+        context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function project(point) {
+        const cosY = Math.cos(rotationY);
+        const sinY = Math.sin(rotationY);
+        const cosX = Math.cos(rotationX);
+        const sinX = Math.sin(rotationX);
+        const rotatedX = point.x * cosY - point.z * sinY;
+        const rotatedZ = point.x * sinY + point.z * cosY;
+        const rotatedY = point.y * cosX - rotatedZ * sinX;
+        const finalZ = point.y * sinX + rotatedZ * cosX;
+        const scale = 520 / (520 - finalZ);
+        return {
+          x: width / 2 + rotatedX * scale,
+          y: height / 2 + rotatedY * scale,
+          z: finalZ,
+          scale,
+        };
+      }
+
+      function drawRing(z, color, label) {
+        const points = Array.from({ length: 96 }, (_, index) => {
+          const angle = (index / 96) * Math.PI * 2;
+          return project({ x: Math.cos(angle) * 218, y: Math.sin(angle) * 136, z });
+        });
+        context.beginPath();
+        points.forEach((point, index) => {
+          if (index === 0) context.moveTo(point.x, point.y);
+          else context.lineTo(point.x, point.y);
+        });
+        context.closePath();
+        context.strokeStyle = color;
+        context.lineWidth = 1;
+        context.setLineDash([4, 7]);
+        context.stroke();
+        context.setLineDash([]);
+        const labelPoint = points[10];
+        context.fillStyle = 'rgba(244,239,225,0.48)';
+        context.font = '10px system-ui, sans-serif';
+        context.fillText(label, labelPoint.x + 4, labelPoint.y - 4);
+      }
+
+      function draw(timestamp = 0) {
+        if (!prefersReducedMotion && !dragging) {
+          rotationY += 0.0016;
+        }
+        context.clearRect(0, 0, width, height);
+        context.fillStyle = 'rgba(7,8,11,0.22)';
+        context.fillRect(0, 0, width, height);
+        drawRing(92, 'rgba(200,78,83,0.28)', 'C1');
+        drawRing(0, 'rgba(214,168,79,0.24)', 'C2');
+        drawRing(-92, 'rgba(86,214,201,0.22)', 'C3');
+        networkNodes.forEach((entry) => {
+          entry.projected = project(entry.base);
+        });
+
+        networkEdges
+          .slice()
+          .sort((a, b) => ((a.source.projected.z + a.target.projected.z) - (b.source.projected.z + b.target.projected.z)))
+          .forEach((edge) => {
+            const source = edge.source.projected;
+            const target = edge.target.projected;
+            const depth = Math.max(0, Math.min(1, ((source.z + target.z) / 2 + 220) / 440));
+            const opacity = Math.min(0.68, 0.1 + edge.similarity * 0.45 + depth * 0.16);
+            context.beginPath();
+            context.moveTo(source.x, source.y);
+            context.lineTo(target.x, target.y);
+            context.strokeStyle = `rgba(86,214,201,${opacity.toFixed(3)})`;
+            context.lineWidth = Math.max(0.8, edge.similarity * 2.2) * ((source.scale + target.scale) / 2);
+            context.stroke();
+          });
+
+        const sortedNodes = networkNodes.slice().sort((a, b) => a.projected.z - b.projected.z);
+        sortedNodes.forEach((entry) => {
+          const position = entry.projected;
+          const radius = entry.radius * position.scale;
+          const isHovered = hovered && hovered.key === entry.key;
+          context.beginPath();
+          context.arc(position.x, position.y, radius + (isHovered ? 4 : 0), 0, Math.PI * 2);
+          context.fillStyle = isHovered ? rgba(entry.color, 0.32) : rgba(entry.color, 0.16);
+          context.fill();
+          context.beginPath();
+          context.arc(position.x, position.y, radius, 0, Math.PI * 2);
+          context.fillStyle = rgba(entry.color, Math.min(0.96, 0.58 + position.scale * 0.18));
+          context.fill();
+          context.strokeStyle = isHovered ? 'rgba(244,239,225,0.92)' : 'rgba(244,239,225,0.26)';
+          context.lineWidth = isHovered ? 2 : 1;
+          context.stroke();
+          if (topLabels.has(entry.key) || isHovered) {
+            context.fillStyle = isHovered ? '#f4efe1' : 'rgba(244,239,225,0.72)';
+            context.font = `${isHovered ? 12 : 10}px system-ui, sans-serif`;
+            context.fillText((entry.doc.title || entry.doc.filename || '').slice(0, isHovered ? 42 : 24), position.x + radius + 6, position.y + 4);
+          }
+        });
+
+        if (!prefersReducedMotion) {
+          relatedNetworkState.frame = requestAnimationFrame(draw);
+        } else {
+          relatedNetworkState.frame = null;
+        }
+      }
+
+      function findNodeAt(clientX, clientY) {
+        const bounds = canvas.getBoundingClientRect();
+        const x = clientX - bounds.left;
+        const y = clientY - bounds.top;
+        return networkNodes
+          .slice()
+          .sort((a, b) => b.projected.z - a.projected.z)
+          .find((entry) => {
+            const position = entry.projected;
+            const radius = entry.radius * position.scale + 6;
+            return Math.hypot(position.x - x, position.y - y) <= radius;
+          }) || null;
+      }
+
+      function updateTooltip(event) {
+        if (!hovered) {
+          tooltip.hidden = true;
+          return;
+        }
+        const bounds = node.querySelector('.network-3d-wrap').getBoundingClientRect();
+        tooltip.hidden = false;
+        tooltip.style.left = `${Math.min(Math.max(event.clientX - bounds.left, 136), bounds.width - 136)}px`;
+        tooltip.style.top = `${Math.max(event.clientY - bounds.top, 58)}px`;
+        tooltip.innerHTML = `<strong>${escapeHtml(hovered.doc.title || hovered.doc.filename)}</strong>${escapeHtml(hovered.doc.evidence_category || 'Unclassified')} · ${hovered.degree} related links`;
+      }
+
+      function handlePointerMove(event) {
+        if (dragging && lastPointer) {
+          const deltaX = event.clientX - lastPointer.x;
+          const deltaY = event.clientY - lastPointer.y;
+          rotationY += deltaX * 0.008;
+          rotationX = Math.max(-0.9, Math.min(0.9, rotationX + deltaY * 0.006));
+          dragDistance += Math.hypot(deltaX, deltaY);
+          lastPointer = { x: event.clientX, y: event.clientY };
+          if (prefersReducedMotion) draw();
+          return;
+        }
+        hovered = findNodeAt(event.clientX, event.clientY);
+        canvas.style.cursor = hovered ? 'pointer' : 'grab';
+        updateTooltip(event);
+        if (prefersReducedMotion) draw();
+      }
+
+      function handlePointerDown(event) {
+        dragging = true;
+        pointer = event.pointerId;
+        lastPointer = { x: event.clientX, y: event.clientY };
+        startPointer = { x: event.clientX, y: event.clientY };
+        dragDistance = 0;
+        canvas.setPointerCapture(pointer);
+      }
+
+      function handlePointerUp(event) {
+        const releaseDistance = startPointer ? Math.hypot(event.clientX - startPointer.x, event.clientY - startPointer.y) : 0;
+        const moved = Math.max(dragDistance, releaseDistance);
+        dragging = false;
+        lastPointer = null;
+        startPointer = null;
+        if (pointer !== null && canvas.hasPointerCapture(pointer)) {
+          canvas.releasePointerCapture(pointer);
+        }
+        pointer = null;
+        if (moved < 3) {
+          const target = findNodeAt(event.clientX, event.clientY);
+          if (target) {
+            openDocumentsWithFilters({ search: target.key });
+          }
+        }
+      }
+
+      function handlePointerLeave() {
+        hovered = null;
+        dragging = false;
+        startPointer = null;
+        dragDistance = 0;
+        tooltip.hidden = true;
+        canvas.style.cursor = 'grab';
+        if (prefersReducedMotion) draw();
+      }
+
+      function handleKeydown(event) {
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+          event.preventDefault();
+          rotationY += event.key === 'ArrowLeft' ? -0.12 : 0.12;
+          draw();
+        }
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+          event.preventDefault();
+          rotationX = Math.max(-0.9, Math.min(0.9, rotationX + (event.key === 'ArrowUp' ? -0.08 : 0.08)));
+          draw();
+        }
+      }
+
+      resizeCanvas();
+      draw();
+      canvas.addEventListener('pointermove', handlePointerMove);
+      canvas.addEventListener('pointerdown', handlePointerDown);
+      canvas.addEventListener('pointerup', handlePointerUp);
+      canvas.addEventListener('pointercancel', handlePointerLeave);
+      canvas.addEventListener('pointerleave', handlePointerLeave);
+      canvas.addEventListener('keydown', handleKeydown);
+      relatedNetworkState.cleanup = () => {
+        canvas.removeEventListener('pointermove', handlePointerMove);
+        canvas.removeEventListener('pointerdown', handlePointerDown);
+        canvas.removeEventListener('pointerup', handlePointerUp);
+        canvas.removeEventListener('pointercancel', handlePointerLeave);
+        canvas.removeEventListener('pointerleave', handlePointerLeave);
+        canvas.removeEventListener('keydown', handleKeydown);
+      };
     }
 
     function defaultRegisterFilters(kind) {
