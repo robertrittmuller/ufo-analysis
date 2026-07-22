@@ -11,6 +11,7 @@ from html import escape as html_escape
 import io
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -34,6 +35,28 @@ from PIL import Image
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_local_env() -> None:
+    """Load simple KEY=VALUE pairs from the ignored project .env file."""
+    env_path = REPO_ROOT / ".env"
+    if not env_path.is_file():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key.isidentifier():
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
+load_local_env()
 DEFAULT_SOURCE_DIR = REPO_ROOT / "data" / "sources"
 DEFAULT_OUTPUT_HTML = REPO_ROOT / "dashboard" / "index.html"
 DEFAULT_OUTPUT_JSON = REPO_ROOT / "data" / "processed" / "ufo_dashboard_analysis.json"
@@ -986,17 +1009,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
       "--review-base-url",
-      default="http://localhost:4321/v1",
+      default=os.getenv("UFO_REVIEW_BASE_URL", "http://localhost:4321/v1"),
       help="Base URL for the local OpenAI-compatible review model endpoint.",
     )
     parser.add_argument(
       "--review-model",
-      default="Qwen3.6-35B-A3B-UD-MLX-4bit",
+      default=os.getenv("UFO_REVIEW_MODEL", "Qwen3.6-35B-A3B-UD-MLX-4bit"),
       help="Model name to use for local multimodal review generation.",
     )
     parser.add_argument(
       "--review-api-key",
-      default="REDACTED",
+      default=os.getenv("UFO_REVIEW_API_KEY"),
       help="API key for authenticating with the local model endpoint.",
     )
     parser.add_argument(
@@ -1019,17 +1042,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
       "--embedding-model",
-      default="Qwen3-Embedding-0.6B-4bit-DWQ",
+      default=os.getenv("UFO_EMBEDDING_MODEL", "Qwen3-Embedding-0.6B-4bit-DWQ"),
       help="OpenAI-compatible embedding model name used to identify related sources.",
     )
     parser.add_argument(
       "--embedding-base-url",
-      default=None,
+      default=os.getenv("UFO_EMBEDDING_BASE_URL"),
       help="Base URL for embeddings. Defaults to --review-base-url.",
     )
     parser.add_argument(
       "--embedding-api-key",
-      default=None,
+      default=os.getenv("UFO_EMBEDDING_API_KEY"),
       help="API key for embeddings. Defaults to --review-api-key.",
     )
     parser.add_argument(
@@ -5343,7 +5366,6 @@ def build_analysis(
         physical_source_pages[filename] = max(physical_source_pages.get(filename, 0), page_count)
     analysis = {
         "generated_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-        "source_dir": str(source_dir),
         "document_count": len(documents),
         "source_document_count": len(documents),
         "incident_count": len(incident_documents),

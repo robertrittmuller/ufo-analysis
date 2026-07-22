@@ -153,16 +153,22 @@ OCR options:
 
 ## Local Model Configuration
 
-The default full pipeline expects an OpenAI-compatible local endpoint:
+Local model settings are loaded from an ignored `.env` file when present. Copy the safe example, then enter the endpoint and credential for your own model server:
 
-| Purpose | Default |
+```sh
+cp .env.example .env
+```
+
+| Environment variable | Safe default |
 |---|---|
-| Review/OCR base URL | `http://localhost:4321/v1` |
-| Review/OCR model | `Qwen3.6-35B-A3B-UD-MLX-4bit` |
-| Embedding model | `Qwen3-Embedding-0.6B-4bit-DWQ` |
-| Audio transcript model | `Qwen3-ASR-0.6B-4bit` |
+| `UFO_REVIEW_BASE_URL` | `http://localhost:4321/v1` |
+| `UFO_REVIEW_API_KEY` | unset |
+| `UFO_REVIEW_MODEL` | `Qwen3.6-35B-A3B-UD-MLX-4bit` |
+| `UFO_EMBEDDING_BASE_URL` | falls back to `UFO_REVIEW_BASE_URL` |
+| `UFO_EMBEDDING_API_KEY` | falls back to `UFO_REVIEW_API_KEY` |
+| `UFO_EMBEDDING_MODEL` | `Qwen3-Embedding-0.6B-4bit-DWQ` |
 
-Override these at build time:
+Command-line flags still override the `.env` values:
 
 ```sh
 python3 tools/build_dashboard.py \
