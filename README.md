@@ -4,6 +4,8 @@ A static, self-contained research dashboard for exploring U.S. government UAP/UF
 
 The current generated analysis covers 221 physical source files, 534 flattened analysis items, and 4,281 source pages across PDF, image, video, and audio material. The dashboard is designed to be served as static files, so it can run locally or deploy to Cloudflare Workers Static Assets without a backend.
 
+View the [live dashboard](https://ufo-analysis.rittmuller.com/).
+
 ## Contents
 
 - [Project Status](#project-status)
