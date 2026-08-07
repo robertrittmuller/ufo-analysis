@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="__PAGE_DESCRIPTION__">
   <meta name="theme-color" content="#07080b">
-  <title>The Signal in the Noise · Scientific UAP Evidence Review</title>
+  <title>What Was in the Sky? · Scientific Analysis of the UFO Reports</title>
   <style>
     :root {
       --void:#07080b;--night:#0d1118;--panel:rgba(17,21,29,.9);--panel-deep:rgba(9,12,17,.96);
@@ -190,6 +190,42 @@
     .load-more:hover{background:var(--gold);color:#15100c}
     .empty{text-align:center;color:var(--muted);padding:50px}
     .source-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+    .phenomenon-list{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:22px}
+    .phenomenon-card{padding:22px;min-height:245px;position:relative;overflow:hidden}
+    .phenomenon-card:after{content:attr(data-count);position:absolute;right:12px;top:-18px;font:700 6rem var(--serif);color:rgba(244,239,225,.035)}
+    .phenomenon-card h3{font:700 1.18rem/1.12 var(--serif);margin:17px 0 9px;max-width:82%;position:relative}
+    .phenomenon-card p{font-size:.79rem;line-height:1.58;color:var(--muted);margin:8px 0;position:relative}
+    .phenomenon-card .likely{color:#d9d1c2;border-top:1px solid rgba(244,239,225,.08);padding-top:11px;margin-top:13px}
+    .behavior-panel{padding:30px}
+    .behavior-chart{display:grid;gap:18px}
+    .behavior-row{display:grid;grid-template-columns:minmax(150px,.55fr) minmax(260px,1.25fr) minmax(220px,1fr);gap:18px;align-items:center;border-bottom:1px solid rgba(244,239,225,.07);padding-bottom:18px}
+    .behavior-row:last-child{border-bottom:0;padding-bottom:0}
+    .behavior-label b{display:block;font:700 1.05rem var(--serif)}
+    .behavior-label span{display:block;color:var(--muted);font-size:.67rem;margin-top:5px;text-transform:uppercase;letter-spacing:.08em}
+    .behavior-bars{display:grid;gap:7px}
+    .behavior-bar{height:19px;background:rgba(244,239,225,.06);position:relative}
+    .behavior-bar i{display:block;height:100%;min-width:2px;background:var(--gold)}
+    .behavior-bar.instrument i{background:var(--teal)}
+    .behavior-bar span{position:absolute;inset:0 8px;display:flex;align-items:center;justify-content:space-between;font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:#e7dfcf}
+    .behavior-note{font-size:.76rem;line-height:1.5;color:var(--muted)}
+    .connection-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+    .connection{padding:24px;border-left:2px solid var(--teal)}
+    .connection.no{border-left-color:var(--red)}
+    .connection small{color:var(--teal);text-transform:uppercase;letter-spacing:.14em;font-size:.62rem}
+    .connection.no small{color:#dc8d91}
+    .connection h3{font:700 1.25rem var(--serif);margin:13px 0 9px}
+    .connection p{font-size:.8rem;line-height:1.58;color:var(--muted);margin:7px 0}
+    .connection .meaning{color:#ddd5c6}
+    .residual-grid{display:grid;gap:8px}
+    .residual{display:grid;grid-template-columns:52px minmax(0,1.15fr) minmax(250px,.8fr) auto;gap:18px;align-items:center;padding:18px}
+    .rank{font:700 1.9rem var(--serif);color:var(--gold)}
+    .residual h3{font:700 1rem var(--serif);margin:0 0 6px}
+    .residual p{font-size:.73rem;color:var(--muted);line-height:1.48;margin:0}
+    .residual-model{font-size:.76rem;line-height:1.5;color:#d6cebf}
+    .residual .score{color:var(--teal);font:700 1.2rem var(--serif);text-align:right}
+    .era-legend{display:flex;gap:13px;flex-wrap:wrap;margin-top:14px}
+    .era-legend span{font-size:.66rem;color:var(--muted);display:flex;align-items:center;gap:6px}
+    .era-legend i{width:8px;height:8px}
     .reference{padding:19px;min-height:170px;display:flex;flex-direction:column}
     .reference small{color:var(--gold);font-size:.62rem;letter-spacing:.11em;text-transform:uppercase}
     .reference h3{font:700 1rem/1.25 var(--serif);margin:13px 0 8px}
@@ -210,14 +246,15 @@
     @media(max-width:1050px){
       .hero{grid-template-columns:1fr}.hero-visual{min-height:440px;border-left:0;border-top:1px solid var(--line-cool)}
       .metric-grid{grid-template-columns:repeat(2,1fr)}.evidence-layout,.section-head,.conclusion{grid-template-columns:1fr}
-      .method-grid,.source-grid{grid-template-columns:repeat(2,1fr)}.milestones{grid-template-columns:repeat(2,1fr)}
+      .method-grid,.source-grid,.phenomenon-list{grid-template-columns:repeat(2,1fr)}.milestones{grid-template-columns:repeat(2,1fr)}
       .filters{grid-template-columns:repeat(2,1fr)}.filters input{grid-column:1/-1}
     }
     @media(max-width:720px){
       .shell,.nav-inner,footer{width:min(100% - 20px,1440px)}.nav-links{display:none}.back-link{margin-left:auto}
       .hero-copy{padding:38px 25px}.hero,.hero-visual{min-height:auto}.hero-visual{height:410px}
       h1{font-size:clamp(3rem,15vw,5.4rem)}.scope-grid{grid-template-columns:1fr}.scope-card{left:16px;right:16px}
-      .metric-grid,.case-grid,.method-grid,.source-grid{grid-template-columns:1fr}.metric{min-height:auto}
+      .metric-grid,.case-grid,.method-grid,.source-grid,.phenomenon-list,.connection-grid{grid-template-columns:1fr}.metric{min-height:auto}
+      .behavior-row,.residual{grid-template-columns:1fr}.residual .score{text-align:left}
       .finding{grid-template-columns:1fr}.finding-stamp{max-width:190px}.milestones{grid-template-columns:1fr}
       .timeline-chart{overflow-x:auto}.decade-col{min-width:45px}.timeline-readout{grid-template-columns:1fr}
       .explorer{padding:16px}.explorer-top{display:grid}.filters{grid-template-columns:1fr}.filters input{grid-column:auto}
@@ -233,8 +270,8 @@
     <div class="nav-inner">
       <a class="brand" href="#top"><span class="brand-mark"></span><span>Evidence review</span></a>
       <nav class="nav-links" aria-label="Report sections">
-        <a href="#summary">Summary</a><a href="#evidence">Evidence</a><a href="#timeline">Timeline</a>
-        <a href="#cases">Cases</a><a href="#method">Method</a><a href="#explorer">Explorer</a><a href="#sources">Sources</a>
+        <a href="#summary">Answer</a><a href="#evidence">Phenomena</a><a href="#performance">Performance</a>
+        <a href="#cases">Cases</a><a href="#connections">Connections</a><a href="#residuals">Residuals</a><a href="#timeline">Timeline</a><a href="#explorer">Reports</a>
       </nav>
       <a class="back-link" href="index.html">← Main dashboard</a>
     </div>
@@ -245,13 +282,13 @@
       <section class="hero">
         <div class="hero-copy">
           <div>
-            <div class="kicker">Scientific evidence audit · 2026</div>
-            <h1>The signal <span>in the noise</span></h1>
-            <p class="hero-deck">A report-by-report reconstruction of the public UAP archive—testing provenance, measurement quality, corroboration, viewing geometry, and conventional hypotheses before asking whether anything truly anomalous remains.</p>
+            <div class="kicker">Scientific analysis of the reports · 2026</div>
+            <h1>What was <span>in the sky?</span></h1>
+            <p class="hero-deck">A case-by-case attempt to identify what people and sensors actually encountered—from postwar “discs” and night orbs to military infrared targets, radar returns, trace claims, and the small set that still resists a clean explanation.</p>
           </div>
           <div class="hero-verdict">
             <div class="verdict-glyph">Σ</div>
-            <div><strong>Corpus-level finding</strong><p id="heroVerdict"></p></div>
+            <div><strong>Answer in one sentence</strong><p id="heroVerdict"></p></div>
           </div>
         </div>
         <div class="hero-visual">
@@ -269,48 +306,55 @@
 
       <section class="section reveal" id="summary">
         <div class="section-head">
-          <div><div class="section-kicker">Executive summary</div><h2>Unidentified is a data state</h2></div>
-          <p class="section-intro">The strongest pattern is not a shared craft, technology, or operator. It is a repeated information deficit: uncertain range, incomplete metadata, testimony without calibration, and derivative media that cannot independently verify the account.</p>
+          <div><div class="section-kicker">Executive Summary</div><h2>Several phenomena—not one hidden answer</h2></div>
+          <p class="section-intro">The reports resolve into recurring physical and observational families. Some are identified; many have a strong conventional best fit; a smaller residue remains genuinely open. That residue does not converge on one shape, technology, geography, or operator.</p>
         </div>
         <div class="metric-grid" id="metrics"></div>
         <div class="panel finding">
           <div class="finding-stamp">Analytic judgment<b>0</b>verified exotic systems</div>
-          <div><h3>The archive supports continued investigation, not an exotic-technology conclusion.</h3><p id="verdictSummary"></p><p class="fine" id="verdictConfidence"></p></div>
+          <div><h3>The extraordinary-looking reports are mostly ordinary mechanisms seen under extraordinary observing conditions.</h3><p id="verdictSummary"></p><p class="fine" id="verdictConfidence"></p></div>
         </div>
       </section>
 
       <section class="section reveal" id="evidence">
         <div class="section-head">
-          <div><div class="section-kicker">Evidence anatomy</div><h2>What can the records actually measure?</h2></div>
-          <p class="section-intro">A vivid account can still be scientifically weak. Reliable identification needs known time and position, sensor calibration, original metadata, reconstructable geometry, and independent observations.</p>
+          <div><div class="section-kicker">Reported phenomena</div><h2>What people and sensors actually saw</h2></div>
+          <p class="section-intro">The reports do not describe a stable fleet of similar craft. They form distinct observation families whose appearance changes with era, lighting, distance, and sensor type.</p>
         </div>
         <div class="evidence-layout">
           <div class="panel chart-panel">
-            <div class="panel-title"><div><h3>Measurement quality across all incidents</h3><p>Hover or focus the segments. “Instrument-grade” combines calibrated telemetry and instrument-derived values.</p></div><span class="unit">share of incident rows</span></div>
-            <div class="measure-stack" id="measureStack" role="img" aria-label="Measurement quality distribution"></div>
+            <div class="panel-title"><div><h3>Reported phenomenon families</h3><p>Each row is assigned by what was described or visibly resolved—not by what the object is assumed to be.</p></div><span class="unit">621 incident-level reports</span></div>
+            <div class="measure-stack" id="measureStack" role="img" aria-label="Reported phenomenon distribution"></div>
             <div class="legend" id="measureLegend"></div>
             <div class="callout" id="measurementCallout"></div>
           </div>
           <div class="panel chart-panel">
-            <div class="panel-title"><div><h3>Evidence sufficiency</h3><p>Score bands measure investigability—not exoticity.</p></div><span class="unit">0–100 scale</span></div>
+            <div class="panel-title"><div><h3>Leading mechanism families</h3><p>Best-fit physical or observational models; these are calibrated judgments, not universal identifications.</p></div><span class="unit">report count</span></div>
             <div class="score-bars" id="scoreBars"></div>
           </div>
         </div>
-        <div class="gate-list panel" style="margin-top:22px">
-          <div class="gate"><div class="gate-index">01</div><div><b>Provenance</b><p>Is this an original record or a retelling? Has the media been recompressed, redacted, illustrated, or detached from metadata?</p></div></div>
-          <div class="gate"><div class="gate-index">02</div><div><b>Geometry & calibration</b><p>Can range, angular size, camera pose, platform motion, wind, and sensor behavior be reconstructed?</p></div></div>
-          <div class="gate"><div class="gate-index">03</div><div><b>Independence</b><p>Do multiple sensors or witnesses add new information, or do several files merely restate one observation?</p></div></div>
-          <div class="gate"><div class="gate-index">04</div><div><b>Competing hypotheses</b><p>Aircraft, balloons, satellites, astronomy, weather, wildlife, hoaxes, perception, and sensor effects are tested before novelty.</p></div></div>
+        <div class="phenomenon-list" id="phenomenonProfiles"></div>
+      </section>
+
+      <section class="section reveal" id="performance">
+        <div class="section-head">
+          <div><div class="section-kicker">Extraordinary behavior</div><h2>Reported performance versus measured performance</h2></div>
+          <p class="section-intro">The most consequential distinction in the entire collection is between a capability label and a physical measurement. A light that appears to jump, stop, or vanish has not yet supplied a speed, acceleration, or trajectory.</p>
         </div>
+        <div class="panel behavior-panel">
+          <div class="panel-title"><div><h3>How often extraordinary behavior has instrument-grade support</h3><p>Gold shows reports carrying the claim; teal shows the subset with calibrated or instrument-derived values. Even those values do not automatically verify the claimed behavior.</p></div><span class="unit">incident rows</span></div>
+          <div class="behavior-chart" id="behaviorChart"></div>
+        </div>
+        <div class="callout"><b>Interpretation:</b> the public material contains many descriptions of extraordinary motion, but almost no complete, reproducible motion solutions. The rational conclusion is not that the witnesses saw nothing; it is that the observation cannot yet distinguish extraordinary physics from ordinary geometry.</div>
       </section>
 
       <section class="section reveal" id="timeline">
         <div class="section-head">
-          <div><div class="section-kicker">Timeline of evidence</div><h2>Eight decades, changing sensors</h2></div>
-          <p class="section-intro">Counts reflect what agencies preserved, digitized, reviewed, and released. They are not a clean estimate of how often UAP occurred.</p>
+          <div><div class="section-kicker">How reports changed</div><h2>The “object” changes with the observing era</h2></div>
+          <p class="section-intro">Postwar witnesses mostly reported discs and lights. Modern military systems mostly record unresolved contrast targets. That shift is evidence that sensors and cultural vocabulary shape the phenomenon we perceive.</p>
         </div>
         <div class="panel timeline-panel">
-          <div class="timeline-controls"><span class="range-label" id="timelineTitle">Incident records by decade</span><div class="toggle-group" role="group" aria-label="Timeline view"><button class="active" data-timeline="quality">Evidence quality</button><button data-timeline="volume">Volume only</button></div></div>
+          <div class="timeline-controls"><span class="range-label" id="timelineTitle">Phenomenon mix by decade</span><div class="toggle-group" role="group" aria-label="Timeline view"><button class="active" data-timeline="quality">Phenomenon mix</button><button data-timeline="volume">Volume</button></div></div>
           <div class="timeline-chart" id="timelineChart"></div>
           <div class="timeline-readout"><strong id="timelineDecade">Select</strong><p id="timelineText">Choose a decade to inspect its record volume and evidence mix.</p><span class="unit" id="timelineCount"></span></div>
         </div>
@@ -319,16 +363,32 @@
 
       <section class="section reveal" id="cases">
         <div class="section-head">
-          <div><div class="section-kicker">Case reconstructions</div><h2>Four ways evidence can mislead</h2></div>
-          <p class="section-intro">These cases expose the recurring analytic traps: partial explanations mistaken for total ones, labels not updated across files, ambiguous geometry, and recreations counted as observations.</p>
+          <div><div class="section-kicker">Case reconstructions</div><h2>What likely happened, report by report</h2></div>
+          <p class="section-intro">Ten representative cases compare the original claim with the physical reconstruction. They include resolved events, weakened extraordinary claims, and the strongest remaining residuals.</p>
         </div>
         <div class="case-grid" id="caseGrid"></div>
       </section>
 
+      <section class="section reveal" id="connections">
+        <div class="section-head">
+          <div><div class="section-kicker">Connecting the dots</div><h2>Which patterns are real—and which are seductive</h2></div>
+          <p class="section-intro">A scientifically useful connection predicts something across cases. Superficial similarity—especially a repeated shape word—is not enough.</p>
+        </div>
+        <div class="connection-grid" id="connectionGrid"></div>
+      </section>
+
+      <section class="section reveal" id="residuals">
+        <div class="section-head">
+          <div><div class="section-kicker">The residual set</div><h2>Cases that still deserve serious work</h2></div>
+          <p class="section-intro">These are ranked for recoverable information and scientific value, not for narrative strangeness. “Residual” means the available public evidence does not discriminate among plausible causes.</p>
+        </div>
+        <div class="residual-grid" id="residualGrid"></div>
+      </section>
+
       <section class="section reveal" id="method">
         <div class="section-head">
-          <div><div class="section-kicker">Scientific method</div><h2>How every report was assessed</h2></div>
-          <p class="section-intro">The procedure is conservative by design. Missing evidence lowers confidence; it never supplies evidence for a preferred identity.</p>
+          <div><div class="section-kicker">Methods appendix</div><h2>How each conclusion was reached</h2></div>
+          <p class="section-intro">Methodology supports the case conclusions; it is not the subject of the report. The governing rule is simple: reconstruct physical motion only from measured geometry, and never use missing data as evidence for an exotic identity.</p>
         </div>
         <div class="method-grid">
           <article class="method panel"><span class="number">01</span><h3>Normalize the archive</h3><p>Separate physical source files from flattened incident rows, extract time/place/media fields, and group obvious event families to avoid double counting.</p></article>
@@ -343,12 +403,12 @@
 
       <section class="section reveal" id="explorer">
         <div class="section-head">
-          <div><div class="section-kicker">Complete assessment</div><h2>Inspect every record</h2></div>
-          <p class="section-intro">Search the full set of physical reports or switch to incident-level rows. Open any result for its assessment, evidence gaps, and source-specific research trail.</p>
+          <div><div class="section-kicker">Report-by-report conclusions</div><h2>What I think happened in every report</h2></div>
+          <p class="section-intro">Search every source or incident. Each entry now leads with the observed phenomenon, the most defensible working model, its confidence, and the exact fact that prevents a stronger conclusion.</p>
         </div>
         <div class="panel explorer">
           <div class="explorer-top">
-            <div class="explorer-title"><h3>Evidence explorer</h3><p id="explorerSubtitle"></p></div>
+            <div class="explorer-title"><h3>Case conclusion explorer</h3><p id="explorerSubtitle"></p></div>
             <div class="mode-tabs" role="tablist"><button class="active" data-mode="reports">Source reports</button><button data-mode="incidents">Incident rows</button></div>
           </div>
           <div class="filters">
@@ -358,7 +418,7 @@
             <select id="eraFilter" aria-label="Filter by era"><option value="">All decades</option></select>
             <select id="sortSelect" aria-label="Sort records"><option value="priority">Priority</option><option value="evidence">Evidence score</option><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="title">Title A–Z</option></select>
           </div>
-          <div class="result-meta"><span id="resultCount"></span><span>Score = investigability, not probability of anomaly</span></div>
+          <div class="result-meta"><span id="resultCount"></span><span>Working model ≠ definitive identification</span></div>
           <div class="records" id="records"></div>
           <button class="load-more" id="loadMore" type="button">Load more records</button>
         </div>
@@ -373,7 +433,7 @@
       </section>
 
       <section class="section panel conclusion reveal">
-        <div><div class="section-kicker">Bottom line</div><blockquote>What is going on is mostly a mixture of <span>ordinary phenomena, imperfect sensing, human perception, historical noise, and missing data.</span></blockquote></div>
+        <div><div class="section-kicker">Bottom line</div><blockquote>The reports are best explained as <span>many different things that become visually similar when distance, darkness, speed, and sensors remove identifying detail.</span></blockquote></div>
         <div class="conclusion-list">
           <div class="conclusion-item"><b>No single hidden cause is required</b><p>The corpus spans unrelated decades, sensors, agencies, environments, and evidentiary standards.</p></div>
           <div class="conclusion-item"><b>A residue is still worth studying</b><p>Some cases retain information value, but the next step is better collection—not stronger claims.</p></div>
@@ -514,6 +574,101 @@
       var sectionObserver=new IntersectionObserver(function(entries){entries.forEach(function(e){if(e.isIntersecting)navs.forEach(function(a){a.classList.toggle("active",a.getAttribute("href")==="#"+e.target.id)})})},{rootMargin:"-35% 0px -55% 0px"});
       sections.forEach(function(s){sectionObserver.observe(s)});
       window.addEventListener("scroll",function(){var max=document.documentElement.scrollHeight-innerHeight;document.getElementById("progress").style.width=(max?scrollY/max*100:0)+"%"},{passive:true});
+    })();
+  </script>
+  <script>
+    (function(){
+      "use strict";
+      var report=JSON.parse(document.getElementById("scientificData").textContent);
+      var story=report.phenomenon_story;
+      var sourceIndex={};report.sources.forEach(function(s){sourceIndex[s.id]=s});
+      var palette=["#d6a84f","#56d6c9","#7d9cff","#9bb46e","#c84e53","#8c7ab8","#667085"];
+      function e(v){return String(v==null?"":v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+      function n(v){return Number(v||0).toLocaleString()}
+      function ext(record){
+        var href=record.original_source_url||record.source_href||"";
+        return href?'<a class="source-link" href="'+e(href)+'" target="_blank" rel="noopener">Open report ↗</a>':"";
+      }
+      function citations(ids){
+        return (ids||[]).map(function(id){var s=sourceIndex[id];return s?'<a class="source-link" href="'+e(s.url)+'" target="_blank" rel="noopener">'+e(s.publisher)+' ↗</a>':""}).join("");
+      }
+
+      var metrics2=[
+        {label:"Phenomenon families",value:story.profiles.length,rate:"distinct observation patterns",copy:"From discs and orbs to radar targets, trace claims, and sensor-only contrast."},
+        {label:"Resolved by source research",value:report.headline.source_resolved,rate:"incident-level conclusions",copy:"Cases with an identification in the source or in a directly related investigation."},
+        {label:"Priority residuals",value:report.headline.residual_case_count,rate:"selected for follow-up",copy:"The most scientifically useful cases still lacking a defensible identity."},
+        {label:"Verified exotic systems",value:report.headline.verified_exotic_technology,rate:"in the public evidence",copy:"No case demonstrates novel physics, nonhuman manufacture, or a common advanced platform."}
+      ];
+      document.getElementById("metrics").innerHTML=metrics2.map(function(m){return '<article class="metric"><span class="label">'+e(m.label)+'</span><strong>'+n(m.value)+'</strong><span class="rate">'+e(m.rate)+'</span><p>'+e(m.copy)+'</p></article>'}).join("");
+      document.getElementById("verdictSummary").textContent=story.answer;
+
+      var profiles=story.profiles;
+      var topProfiles=profiles.slice(0,6),otherCount=profiles.slice(6).reduce(function(sum,p){return sum+p.count},0);
+      var stackRows=topProfiles.concat(otherCount?[{label:"Other reported forms",count:otherCount,share:Math.round(otherCount/report.headline.incident_records*1000)/10}]:[]);
+      var stack=document.getElementById("measureStack"),legend=document.getElementById("measureLegend");
+      stack.innerHTML="";legend.innerHTML="";
+      stackRows.forEach(function(row,i){
+        var color=palette[i%palette.length],seg=document.createElement("div");seg.className="stack-segment";seg.style.flexBasis=row.share+"%";seg.style.background=color;seg.title=row.label+": "+row.count+" ("+row.share+"%)";seg.tabIndex=0;
+        if(row.share>8)seg.innerHTML="<span>"+row.share+"%</span>";stack.appendChild(seg);
+        legend.insertAdjacentHTML("beforeend",'<div class="legend-item"><i class="swatch" style="background:'+color+'"></i><span><b>'+e(row.label)+'</b>'+n(row.count)+' · '+row.share+'%</span></div>');
+      });
+      document.getElementById("measurementCallout").innerHTML="<b>The central pattern:</b> disc/oval reports dominate the historical visual record, while indistinct sensor targets dominate modern EO/IR footage. The reported object changes with the way it is observed.";
+
+      var mechanisms=report.distributions.mechanism_group.slice(0,8),maxMechanism=Math.max.apply(null,mechanisms.map(function(d){return d.count}));
+      document.getElementById("scoreBars").innerHTML=mechanisms.map(function(d){return '<div class="bar-row"><span class="bar-label">'+e(d.label)+'</span><span class="track"><span class="fill" style="width:'+(d.count/maxMechanism*100)+'%"></span></span><span class="bar-value">'+n(d.count)+'</span></div>'}).join("");
+      document.getElementById("phenomenonProfiles").innerHTML=profiles.map(function(p,i){
+        var top=p.top_mechanisms[0]?p.top_mechanisms[0].label:"Indeterminate";
+        return '<article class="phenomenon-card panel" data-count="'+p.count+'"><span class="chip '+(i<3?"gold":"")+'">'+p.share+'% · '+p.count+' reports</span><h3>'+e(p.label)+'</h3><p>'+e(p.plain)+'</p><p class="likely"><b>Leading interpretation:</b> '+e(p.likely)+'</p><p><b>Do not overread:</b> '+e(p.caveat)+'</p><span class="fine">Most common model: '+e(top)+'</span></article>'
+      }).join("");
+
+      var maxClaim=Math.max.apply(null,story.behavior_claims.map(function(d){return d.reported}));
+      document.getElementById("behaviorChart").innerHTML=story.behavior_claims.map(function(d){
+        var extra=d.key==="transmedium"?" · "+d.direct_water_motion+" directly coded water interaction":"";
+        return '<div class="behavior-row"><div class="behavior-label"><b>'+e(d.label)+'</b><span>'+d.reported+' reported · '+d.instrument_grade+' instrument-grade'+e(extra)+'</span></div><div class="behavior-bars"><div class="behavior-bar"><i style="width:'+(d.reported/maxClaim*100)+'%"></i><span><em>reported</em><b>'+d.reported+'</b></span></div><div class="behavior-bar instrument"><i style="width:'+(d.instrument_grade/maxClaim*100)+'%"></i><span><em>instrument-grade subset</em><b>'+d.instrument_grade+'</b></span></div></div><div class="behavior-note">'+e(d.interpretation)+'</div></div>'
+      }).join("");
+
+      document.getElementById("caseGrid").innerHTML=story.case_dossiers.map(function(c,i){
+        var r=c.record;
+        return '<article class="case panel dossier" data-index="'+String(i+1).padStart(2,"0")+'"><div class="case-meta"><span class="chip gold">'+e(c.tag)+'</span><span class="chip teal">'+e(r.model_status)+'</span></div><h3>'+e(c.title)+'</h3><p><b>What was reported:</b> '+e(c.claim)+'</p><p><b>Reconstruction:</b> '+e(c.reconstruction)+'</p><p class="case-note"><b>Assessment:</b> '+e(c.conclusion)+'</p><div class="case-actions">'+ext(r)+citations(c.refs)+'</div></article>'
+      }).join("");
+
+      document.getElementById("connectionGrid").innerHTML=story.connections.map(function(c){
+        return '<article class="connection panel '+(c.kind==="Do not connect"?"no":"")+'"><small>'+e(c.kind)+'</small><h3>'+e(c.title)+'</h3><p>'+e(c.evidence)+'</p><p class="meaning"><b>What it means:</b> '+e(c.meaning)+'</p></article>'
+      }).join("");
+      document.getElementById("residualGrid").innerHTML=story.residual_cases.map(function(r,i){
+        return '<article class="residual panel"><span class="rank">'+String(i+1).padStart(2,"0")+'</span><div><h3>'+e(r.title)+'</h3><p>'+e((r.date_label||r.decade)+" · "+r.phenomenon_group+" · "+r.observation_mode.replace(/_/g," "))+'</p></div><div class="residual-model"><b>'+e(r.working_model)+'</b><br>'+e(r.motion_interpretation)+'</div><div><div class="score">'+r.priority_score+'</div>'+ext(r)+'</div></article>'
+      }).join("");
+
+      var groupOrder=profiles.slice(0,5).map(function(p){return p.label}),groupColors={};
+      groupOrder.forEach(function(g,i){groupColors[g]=palette[i]});
+      function decadeRows(){
+        var buckets={};report.incidents.forEach(function(r){if(!buckets[r.decade])buckets[r.decade]=[];buckets[r.decade].push(r)});
+        return Object.keys(buckets).sort(function(a,b){if(a==="Undated")return 1;if(b==="Undated")return -1;return parseInt(a)-parseInt(b)}).map(function(decade){return {decade:decade,rows:buckets[decade]}})
+      }
+      var decadeData=decadeRows(),timelineMode2="mix",selected2=null;
+      function drawTimeline(){
+        var max=Math.max.apply(null,decadeData.map(function(d){return d.rows.length}));
+        document.getElementById("timelineChart").innerHTML=decadeData.map(function(d){
+          var height=Math.max(4,d.rows.length/max*100),counts={};d.rows.forEach(function(r){counts[r.phenomenon_group]=(counts[r.phenomenon_group]||0)+1});
+          var bars=timelineMode2==="volume"?'<i class="slice" style="height:100%;width:58%;background:#56d6c9"></i>':groupOrder.map(function(g){return '<i class="slice" style="height:'+(counts[g]||0)/d.rows.length*100+'%;background:'+groupColors[g]+'"></i>'}).join("");
+          return '<div class="decade-col '+(selected2===d.decade?"selected":"")+'" data-new-decade="'+e(d.decade)+'"><div class="decade-bars" style="--height:'+height+'%">'+bars+'</div><span class="decade-label">'+e(d.decade.replace("19","’").replace("20","’"))+'</span></div>'
+        }).join("");
+        document.querySelectorAll("[data-new-decade]").forEach(function(el){el.addEventListener("click",function(){selected2=el.dataset.newDecade;drawTimeline();showTimeline(selected2)})});
+      }
+      function showTimeline(decade){
+        var d=decadeData.find(function(x){return x.decade===decade});if(!d)return;var counts={};d.rows.forEach(function(r){counts[r.phenomenon_group]=(counts[r.phenomenon_group]||0)+1});
+        var top=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]}).slice(0,4).map(function(g){return g+" "+counts[g]}).join(" · ");
+        document.getElementById("timelineDecade").textContent=decade;document.getElementById("timelineText").textContent=top+". The mix reflects both real observing conditions and the dominant reporting/sensor system of the period.";document.getElementById("timelineCount").textContent=d.rows.length+" reports"
+      }
+      var oldToggle=document.querySelector(".timeline-controls .toggle-group"),newToggle=oldToggle.cloneNode(true);oldToggle.replaceWith(newToggle);
+      newToggle.querySelectorAll("button").forEach(function(btn,i){btn.textContent=i===0?"Phenomenon mix":"Volume";btn.dataset.newTimeline=i===0?"mix":"volume";btn.classList.toggle("active",i===0);btn.addEventListener("click",function(){timelineMode2=btn.dataset.newTimeline;newToggle.querySelectorAll("button").forEach(function(b){b.classList.toggle("active",b===btn)});drawTimeline()})});
+      var eraLegend=document.createElement("div");eraLegend.className="era-legend";eraLegend.innerHTML=groupOrder.map(function(g){return '<span><i style="background:'+groupColors[g]+'"></i>'+e(g)+'</span>'}).join("");document.getElementById("timelineChart").after(eraLegend);drawTimeline();
+
+      function decorateRecords(){
+        var mode=document.querySelector("[data-mode].active"),rows=mode&&mode.dataset.mode==="incidents"?report.incidents:report.reports,byTitle={};rows.forEach(function(r){if(!byTitle[r.title])byTitle[r.title]=r});
+        document.querySelectorAll(".record:not(.phenomenon-decorated)").forEach(function(node){var title=node.querySelector(".record-name b"),r=title?byTitle[title.textContent]:null;if(!r)return;node.classList.add("phenomenon-decorated");var tag=node.querySelector(".record-assessment");if(tag)tag.textContent=r.phenomenon_group+" · "+r.assessment;var h=node.querySelector(".record-body h4");if(h)h.textContent="Most likely explanation";var first=node.querySelector(".record-body p");if(first)first.insertAdjacentHTML("afterend",'<h4>What was actually observed</h4><p>'+e(r.observed_phenomenon||"No stable morphology recovered.")+' '+e(r.motion_interpretation||"")+'</p>');var facts=node.querySelector(".record-facts");if(facts)facts.insertAdjacentHTML("afterbegin",'<div class="fact"><small>Phenomenon</small><b>'+e(r.phenomenon_group)+'</b></div><div class="fact"><small>Model status</small><b>'+e(r.model_status)+'</b></div>')})
+      }
+      var recordsNode=document.getElementById("records"),recordObserver=new MutationObserver(decorateRecords);recordObserver.observe(recordsNode,{childList:true});decorateRecords();
     })();
   </script>
 </body>

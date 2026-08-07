@@ -1,6 +1,6 @@
 # UFO Analysis Dashboard
 
-A static, self-contained research dashboard for exploring U.S. government UAP/UFO release material. The project downloads source media, extracts text from PDFs/images/audio/video, enriches records with local model review, and builds `dashboard/index.html` plus a structured JSON analysis file. A complementary scientific evidence review at `dashboard/scientific-analysis.html` audits every report and incident using an explicit evidence-sufficiency model.
+A static, self-contained research dashboard for exploring U.S. government UAP/UFO release material. The project downloads source media, extracts text from PDFs/images/audio/video, enriches records with local model review, and builds `dashboard/index.html` plus a structured JSON analysis file. A complementary report-by-report scientific analysis at `dashboard/scientific-analysis.html` reconstructs the reported phenomena, tests physical explanations, connects defensible patterns, and identifies the cases that remain unresolved.
 
 The current generated analysis covers 377 physical source files, 621 flattened incident records, and 8,678 source pages across PDF, image, video, and audio material. The dashboards are designed to be served as static files, so they can run locally or deploy to Cloudflare Workers Static Assets without a backend.
 

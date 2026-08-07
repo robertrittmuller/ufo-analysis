@@ -19,6 +19,7 @@ import json
 import math
 from pathlib import Path
 import re
+from statistics import median
 from typing import Any, Iterable
 
 
@@ -152,6 +153,30 @@ REFERENCE_SOURCES = [
         "year": 2024,
         "url": "https://www.aaro.mil/Portals/136/PDFs/Information%20Papers/ORNL-Synopsis_Analysis_of_a_Metallic_Specimen.pdf",
         "role": "Laboratory analysis finding terrestrial composition and no claimed anomalous waveguide property.",
+    },
+    {
+        "id": "aaro_imagery_catalog",
+        "title": "AARO UAP imagery and analytical descriptions",
+        "publisher": "AARO",
+        "year": 2026,
+        "url": "https://www.aaro.mil/Next-AARO-Home-redesign/Next-Parent/Next-AARO-UAP-Imagery-Acc-Table/",
+        "role": "Primary descriptions of released videos, including sensor motion, loss of contrast, and resolved comparison cases.",
+    },
+    {
+        "id": "aaro_western_aircraft",
+        "title": "Western United States UAP case resolution",
+        "publisher": "AARO",
+        "year": 2026,
+        "url": "https://www.aaro.mil/Portals/136/PDFs/case_resolution_reports/Case_Resolution_of%20_Western_United_States_Uap_508-02262024.pdf",
+        "role": "Boresight and air-traffic analysis identifying distant commercial aircraft and sensor-induced shape changes.",
+    },
+    {
+        "id": "aaro_eglin",
+        "title": "Eglin UAP case resolution",
+        "publisher": "AARO",
+        "year": 2026,
+        "url": "https://www.aaro.mil/Portals/136/PDFs/case_resolution_reports/Case_Resolution_of_Eglin_UAP_2_508_.pdf",
+        "role": "Geometry, wind, lighting, and object testing supporting a lighter-than-air identification.",
     },
 ]
 
@@ -297,6 +322,233 @@ def family_label(record: dict[str, Any]) -> str:
     if record.get("source_document_title"):
         return str(record["source_document_title"])
     return title or str(record.get("source_id") or "Unlabeled record")
+
+
+def phenomenon_profile(record: dict[str, Any]) -> dict[str, str]:
+    """Describe what was reported before attempting to identify it."""
+    text = normalized_text(record)
+    morph = set(record.get("morphology_normalized") or [])
+    corroboration = set(record.get("corroboration_types") or [])
+    mode = str(record.get("primary_observation_mode") or "unknown")
+    event_type = str(record.get("event_record_type") or "unknown")
+    day = str(record.get("day_night_context") or "unknown")
+
+    if event_type in CONTEXT_RECORD_TYPES or str(record.get("resolution_status")) in CONTEXT_RESOLUTIONS:
+        group = "Context, testimony, or non-event"
+        observed = "No discrete airborne phenomenon is recoverable from this row."
+    elif "physical_trace" in corroboration or any(token in text for token in ("debris", "fragment", "alloy", "material specimen", "ground trace")):
+        group = "Material or physical-trace claim"
+        observed = "A recovered substance, surface mark, or alleged interaction is part of the claim."
+    elif day == "space_or_orbit" or any(token in text for token in ("apollo ", "gemini ", "mercury-atlas", "space shuttle", "sts-80", "skylab")):
+        group = "Spaceborne light or object"
+        observed = "A light, speck, object, or verbal observation was recorded during a crewed space mission."
+    elif mode in {"radar", "rf_sigint"} and not ({"photo_or_video", "multiple_witnesses"} & corroboration):
+        group = "Radar or electronic target"
+        observed = "The phenomenon exists primarily as an electronic return rather than a resolved visible object."
+    elif "triangle" in morph:
+        group = "Triangle or three-light form"
+        observed = "Witnesses or imagery describe a triangular outline or three-light arrangement."
+    elif "cylinder_cigar_tictac" in morph:
+        group = "Cylinder, cigar, or tic-tac form"
+        observed = "The object is described as elongated, oblong, cylindrical, or tic-tac-like."
+    elif "fireball" in morph:
+        group = "Fireball or meteor-like event"
+        observed = "A bright, short-lived luminous body or trail dominates the observation."
+    elif "disc_or_saucer" in morph:
+        group = "Disc or oval form"
+        observed = "The witness described a disc, saucer, oval, or flattened circular body."
+    elif "sphere_or_orb" in morph or "light_point" in morph:
+        group = "Light, orb, or sphere"
+        observed = "The observation is principally a point-like light or round object with little recoverable surface detail."
+    elif "irregular_blob_or_area_of_contrast" in morph or mode in {"ir_thermal", "eo_video", "photo_image"}:
+        group = "Indistinct sensor target"
+        observed = "The released image resolves an area of contrast, but not enough structure to identify an object."
+    elif "formation_only" in morph or str(record.get("object_count_bucket")) in {"three_to_five", "many_or_swarm"}:
+        group = "Formation or multiple objects"
+        observed = "Multiple lights or targets are reported in a pattern or coordinated-looking group."
+    else:
+        group = "Unspecified aerial observation"
+        observed = "The public record does not preserve a stable morphology."
+
+    condition = "daylight" if day == "daylight" else "low-light" if day in {"night", "dawn_or_dusk"} else day.replace("_", " ")
+    return {"group": group, "observed": observed, "condition": condition}
+
+
+def working_hypothesis(record: dict[str, Any], phenomenon: dict[str, str]) -> dict[str, str]:
+    """Assign the narrowest defensible model without treating missing data as proof."""
+    text = normalized_text(record)
+    title = str(record.get("title") or "")
+    title_lower = title.lower()
+    resolution = str(record.get("resolution_status") or "unknown")
+    mundane = str(record.get("mundane_explanation_present") or "unclear")
+    group = phenomenon["group"]
+    mode = str(record.get("primary_observation_mode") or "unknown")
+    year = safe_year(record)
+
+    def result(bucket: str, model: str, confidence: str, status: str, ref: str) -> dict[str, str]:
+        return {
+            "mechanism_group": bucket,
+            "working_model": model,
+            "model_confidence": confidence,
+            "model_status": status,
+            "model_ref": ref,
+        }
+
+    if is_derivative(record):
+        return result(
+            "Derivative visualization",
+            "A rendering or recreation of testimony, useful for morphology but not an independent observation.",
+            "High",
+            "Context",
+            "nasa_uap_study",
+        )
+    if "fosterbrook" in title_lower or "mrs. fosterbrook" in text:
+        return result(
+            "Fabrication or cultural contamination",
+            "Constructed juvenile hoax made from discarded phonograph/jukebox and radio components.",
+            "High",
+            "Resolved across related records",
+            "fbi_ufo_files",
+        )
+    if "maury island" in text:
+        return result(
+            "Fabrication or ordinary material",
+            "A likely fabricated or exaggerated disc story paired with ordinary smelter slag.",
+            "Moderate-to-high",
+            "Resolved in related investigation records",
+            "fbi_ufo_files",
+        )
+    if "ica uap d001" in title_lower or ("colorado springs" in text and "backscatter" in text):
+        return result(
+            "Atmospheric or optical effect",
+            "Sunlight backscattered from snow-covered terrain into low cloud, producing a stationary luminous form.",
+            "High",
+            "Source-resolved",
+            "nasa_uap_study",
+        )
+    if "egl" in title_lower and "uap" in title_lower:
+        return result(
+            "Balloon or lighter-than-air object",
+            "A windborne lighter-than-air object; geometry, wind, lighting, and balloon tests match the report.",
+            "Moderate",
+            "Resolved by AARO",
+            "aaro_eglin",
+        )
+    if "western united states event" in text or "orbs launching" in text:
+        return result(
+            "Military activity plus unresolved visual residual",
+            "Countermeasure flares plausibly explain roughly 60% of the activity; the remainder lacks technical capture.",
+            "Moderate",
+            "Partially resolved",
+            "pursue_western_update",
+        )
+    if "pr027" in title_lower or "pr034" in title_lower:
+        return result(
+            "Sensor motion and unresolved target",
+            "A real area of contrast was tracked, but platform/sensor motion accounts for much of the apparent erratic path; object identity remains open.",
+            "Moderate",
+            "Behavior substantially constrained; identity unresolved",
+            "aaro_imagery_catalog",
+        )
+    if "pr035" in title_lower:
+        return result(
+            "Contrast loss near a changing background",
+            "A small target became indistinguishable as the background changed from water to land; the video does not demonstrate water entry.",
+            "Moderate-to-high",
+            "Apparent transmedium behavior not supported",
+            "aaro_imagery_catalog",
+        )
+    if "pr028" in title_lower:
+        return result(
+            "Sensor-band-specific target",
+            "A SWIR-only target with uncertain independent range; balloon, atmospheric target, or sensor-specific contrast remain viable.",
+            "Low-to-moderate",
+            "Unresolved",
+            "aaro_imagery_catalog",
+        )
+    if "gulf of oman" in text and year == 2021:
+        return result(
+            "Unresolved small airborne objects",
+            "Small balloons, drones, aircraft-related objects, and range/sensor effects remain viable; reported responsiveness is not demonstrated by released kinematics.",
+            "Low-to-moderate",
+            "Unresolved residual",
+            "nasa_uap_study",
+        )
+    if "socorro" in text and "zamora" in text:
+        return result(
+            "Unresolved close-range event",
+            "A landed or ascending object was reported with site marks; prototype activity, misinterpretation, or fabrication remain unexcluded.",
+            "Low",
+            "Unresolved residual",
+            "blue_book_archive",
+        )
+
+    source_resolved = resolution == "explained" or mundane == "yes_source_resolved"
+    if source_resolved:
+        if any(token in text for token in ("hoax", "fabricat", "prank")):
+            return result("Fabrication or cultural contamination", "A fabrication or hoax documented by the source investigation.", "High", "Source-resolved", "fbi_ufo_files")
+        if any(token in text for token in ("balloon", "radiosonde", "lighter-than-air")):
+            return result("Balloon or lighter-than-air object", "A balloon or other lighter-than-air object recorded by the source investigation.", "Moderate-to-high", "Source-resolved", "aaro_al_taqaddum")
+        if any(token in text for token in ("meteor", "bolide", "fireball", "re-entry", "reentry")):
+            return result("Astronomical or re-entry event", "A meteor, fireball, or re-entering object recorded by the source investigation.", "Moderate-to-high", "Source-resolved", "nasa_uap_study")
+        if any(token in text for token in ("aircraft", "airplane", "helicopter", "yf-12")):
+            return result("Conventional aircraft or military activity", "A conventional aircraft or known military activity recorded by the source investigation.", "Moderate-to-high", "Source-resolved", "aaro_annual_2024")
+        if any(token in text for token in ("reflection", "refraction", "cloud", "backscatter", "atmospheric", "temperature inversion")):
+            return result("Atmospheric or optical effect", "An atmospheric, lighting, or optical effect recorded by the source investigation.", "Moderate-to-high", "Source-resolved", "nasa_uap_study")
+        if any(token in text for token in ("debris", "ice", "equipment", "instrument glitch")):
+            return result("Mission debris or equipment effect", "Mission-related debris, ice, reflection, or equipment behavior.", "Moderate-to-high", "Source-resolved", "nasa_uap_study")
+        return result("Ordinary object or process", "The source investigation records a conventional identification.", "Moderate", "Source-resolved", "aaro_history_2024")
+
+    if group == "Context, testimony, or non-event":
+        return result("Context rather than a discrete event", "Administrative, historical, or testimonial material without a recoverable airborne event.", "High", "Context", "aaro_history_2024")
+    if group == "Radar or electronic target":
+        return result("Radar target or propagation ambiguity", "Aircraft, balloon, anomalous propagation, interference, or clutter remain viable without raw plots and calibration.", "Low-to-moderate", "Identity unresolved", "aaro_annual_2024")
+    if group == "Spaceborne light or object":
+        return result("Mission debris, ice, reflection, or imaging effect", "Nearby debris or ice, window reflections, illumination geometry, and imaging artifacts are the leading classes.", "Low-to-moderate", "Analyst best fit", "nasa_uap_study")
+    if group == "Triangle or three-light form":
+        return result("Aircraft lighting, formation, or perceptual closure", "Conventional aircraft/formation lighting and the visual completion of an outline remain more economical than a solid triangular craft.", "Low", "Analyst best fit", "faa_vision")
+    if group == "Fireball or meteor-like event":
+        return result("Meteor, fireball, rocket, or re-entry", "A fast luminous atmospheric or re-entering body is the leading class.", "Moderate", "Analyst best fit", "nasa_uap_study")
+    if group == "Indistinct sensor target":
+        return result("Distant object plus sensor/viewing geometry", "A distant aircraft, balloon, drone, bird, or atmospheric target rendered ambiguous by range and sensor processing.", "Low-to-moderate", "Analyst best fit", "aaro_gofast")
+    if group == "Light, orb, or sphere":
+        if str(record.get("day_night_context")) in {"night", "dawn_or_dusk"}:
+            return result("Distant light source", "Aircraft lights, flares, satellites, or celestial objects remain the leading classes when range is unknown.", "Low", "Analyst best fit", "faa_vision")
+        return result("Balloon, small airborne object, or distant aircraft", "A balloon, drone, bird, or distant aircraft is more likely than a structured sphere when surface detail and range are absent.", "Low", "Analyst best fit", "aaro_al_taqaddum")
+    if group == "Cylinder, cigar, or tic-tac form":
+        return result("Elongated balloon, aircraft, or unresolved range", "An elongated lighter-than-air object, aircraft aspect, or unresolved point-spread shape remains plausible.", "Low", "Analyst best fit", "aaro_eglin")
+    if group == "Disc or oval form":
+        return result(
+            "Aircraft, balloon, astronomy, or perceptual ambiguity",
+            "Conventional aircraft, balloons, astronomical sources, experimental systems, and viewing ambiguity remain the leading historical classes.",
+            "Low",
+            "Analyst best fit",
+            "aaro_history_2024",
+        )
+    if group == "Material or physical-trace claim":
+        return result("Ordinary material, fabrication, or unresolved site cause", "Terrestrial material and fabrication must be excluded by laboratory chain-of-custody before a novel-material claim is supportable.", "Low", "Analyst best fit", "ornl_material")
+    if mode in {"naked_eye_visual", "ground_visual", "cockpit_visual"}:
+        return result("Perceptual and range ambiguity", "A conventional distant object or light remains indeterminate because angular appearance does not recover physical size or speed.", "Low", "Analyst best fit", "faa_vision")
+    return result("Indeterminate conventional possibilities", "The public details do not discriminate among common object, environmental, perceptual, and sensor explanations.", "Low", "Indeterminate", "nasa_uap_study")
+
+
+def behavior_interpretation(record: dict[str, Any]) -> str:
+    motions = set(record.get("apparent_motion_class") or [])
+    mode = str(record.get("primary_observation_mode") or "unknown")
+    measured = str(record.get("measurement_quality") or "unknown") in {"instrument_derived_values", "calibrated_telemetry"}
+    if "water_interaction" in motions:
+        return "A water crossing is directly alleged, but independent range and continuous tracking are required to establish a transmedium path."
+    if "erratic_or_abrupt" in motions and mode in {"eo_video", "ir_thermal", "photo_image"} and not measured:
+        return "Sensor slew, stabilization, changing field of view, and unknown range can create large apparent course changes."
+    if "accelerating_or_departing" in motions and not measured:
+        return "The record preserves apparent acceleration, not a calibrated acceleration measurement."
+    if "stationary_hover" in motions:
+        return "A distant light or windborne object can remain nearly stationary in angle without physically hovering."
+    if "disappearing_or_dissipating" in motions:
+        return "Occlusion, contrast loss, glare, cloud, or the sensor threshold can mimic disappearance."
+    if "straight_line_transit" in motions:
+        return "Straight transit is compatible with aircraft, balloons, satellites, birds, drones, and other ordinary motion."
+    return "The released record does not preserve enough geometry to turn apparent motion into a physical trajectory."
 
 
 def corroboration_score(record: dict[str, Any]) -> int:
@@ -491,6 +743,11 @@ def assess_record(record: dict[str, Any]) -> dict[str, Any]:
     if any(token in text for token in ("satellite", "orbital", "space")):
         refs.append("aaro_starlink")
 
+    phenomenon = phenomenon_profile(record)
+    hypothesis = working_hypothesis(record, phenomenon)
+    explanation = hypothesis["working_model"]
+    refs.append(hypothesis["model_ref"])
+
     unresolved_bonus = 18 if assessment.startswith("Unresolved") or assessment.startswith("Mixed") else 0
     sensor_bonus = 8 if set(record.get("corroboration_types") or []) & {"multiple_sensors", "radar_or_sensor"} else 0
     no_mundane_bonus = 5 if mundane == "no" else 0
@@ -521,6 +778,14 @@ def assess_record(record: dict[str, Any]) -> dict[str, Any]:
         "assessment": assessment,
         "best_fit_explanation": explanation,
         "confidence": confidence,
+        "phenomenon_group": phenomenon["group"],
+        "observed_phenomenon": phenomenon["observed"],
+        "observation_condition": phenomenon["condition"],
+        "mechanism_group": hypothesis["mechanism_group"],
+        "working_model": hypothesis["working_model"],
+        "model_confidence": hypothesis["model_confidence"],
+        "model_status": hypothesis["model_status"],
+        "motion_interpretation": behavior_interpretation(record),
         "evidence_score": score,
         "evidence_band": band,
         "priority_score": priority,
@@ -575,6 +840,8 @@ def aggregate_source_reports(
             children = [base]
         assessment_counts = Counter(child["assessment"] for child in children)
         explanation_counts = Counter(child["best_fit_explanation"] for child in children)
+        phenomenon_counts = Counter(child["phenomenon_group"] for child in children)
+        mechanism_counts = Counter(child["mechanism_group"] for child in children)
         reference_ids = list(dict.fromkeys(ref for child in children for ref in child["research_refs"]))[:8]
         gap_counts = Counter(gap for child in children for gap in child["data_gaps"])
         strongest = max(children, key=lambda child: (child["priority_score"], child["evidence_score"]))
@@ -589,6 +856,15 @@ def aggregate_source_reports(
             {
                 "assessment": assessment,
                 "best_fit_explanation": "; ".join(top_explanations),
+                "phenomenon_group": phenomenon_counts.most_common(1)[0][0],
+                "phenomenon_counts": dict(phenomenon_counts),
+                "mechanism_group": mechanism_counts.most_common(1)[0][0],
+                "mechanism_counts": dict(mechanism_counts),
+                "working_model": strongest["working_model"],
+                "model_confidence": strongest["model_confidence"],
+                "model_status": strongest["model_status"],
+                "observed_phenomenon": strongest["observed_phenomenon"],
+                "motion_interpretation": strongest["motion_interpretation"],
                 "confidence": strongest["confidence"],
                 "evidence_score": mean_score,
                 "evidence_band": quality_band(mean_score),
@@ -793,6 +1069,366 @@ def notable_cases(incidents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+PHENOMENON_INTERPRETATIONS = {
+    "Disc or oval form": {
+        "plain": "The classic postwar “flying disc” is principally a visual-era report form.",
+        "likely": "Aircraft aspect, balloons, astronomical sources, experimental systems, reflections, and period-shaped interpretation.",
+        "caveat": "A shape word without range or resolved surface detail does not establish a common vehicle class.",
+    },
+    "Light, orb, or sphere": {
+        "plain": "Most orb reports are unresolved lights or small round targets rather than resolved spherical craft.",
+        "likely": "Aircraft lights, flares, satellites, planets/stars, balloons, drones, or point-spread imagery.",
+        "caveat": "Unknown distance makes apparent size, hovering, and acceleration unreliable.",
+    },
+    "Indistinct sensor target": {
+        "plain": "Modern military videos most often preserve a contrast target, not a visually resolved object.",
+        "likely": "Distant aircraft, balloons, drones, birds, or atmospheric targets combined with sensor geometry and processing.",
+        "caveat": "Reticles, zoom, stabilization, sensor slews, and contrast modes can dominate apparent motion and shape.",
+    },
+    "Cylinder, cigar, or tic-tac form": {
+        "plain": "Elongated silhouettes recur, but the public imagery rarely resolves surfaces or true proportions.",
+        "likely": "Elongated balloons, aircraft aspect, blur/point-spread shape, or an ordinary object at uncertain range.",
+        "caveat": "A two-dimensional image cannot independently determine length, distance, or speed.",
+    },
+    "Triangle or three-light form": {
+        "plain": "Triangle reports are largely low-light eyewitness accounts or later renderings.",
+        "likely": "Aircraft/formation lighting, a partially visible platform, or perceptual closure between separate lights.",
+        "caveat": "No released triangle case combines resolved structure with calibrated multisensor kinematics.",
+    },
+    "Radar or electronic target": {
+        "plain": "Radar cases are more testable than testimony but remain identification problems without raw plots and system state.",
+        "likely": "Aircraft, balloons, anomalous propagation, interference, side lobes, clutter, or a genuine unidentified target.",
+        "caveat": "A radar return establishes a detection; it does not by itself establish a solid craft or exotic motion.",
+    },
+    "Material or physical-trace claim": {
+        "plain": "Trace and debris claims are the most direct-sounding evidence—and the most dependent on chain of custody.",
+        "likely": "Ordinary industrial material, environmental damage, fabrication, or an unresolved terrestrial cause.",
+        "caveat": "Novel-material claims require controlled recovery, comparison samples, and independent laboratory replication.",
+    },
+    "Spaceborne light or object": {
+        "plain": "Space-mission records mostly contain lights, specks, debris references, and ambiguous photographs.",
+        "likely": "Ice, mission debris, window reflections, illumination geometry, satellites, or camera artifacts.",
+        "caveat": "Relative motion near a spacecraft is counterintuitive and range is usually unconstrained from a single view.",
+    },
+    "Fireball or meteor-like event": {
+        "plain": "Brief luminous events form a recognizable atmospheric class.",
+        "likely": "Meteors, bolides, rockets, re-entry debris, lightning, or aircraft illumination.",
+        "caveat": "Exact time, direction, and duration are needed for astronomical or launch correlation.",
+    },
+    "Formation or multiple objects": {
+        "plain": "Multiple targets can look coordinated even when perspective compresses independent motion.",
+        "likely": "Aircraft formations, satellites, balloon groups, birds, or multiple unrelated lights.",
+        "caveat": "Angular spacing alone does not demonstrate communication or coordinated control.",
+    },
+    "Unspecified aerial observation": {
+        "plain": "The report records an unexplained observation but preserves too little morphology to compare identities.",
+        "likely": "Several ordinary object, environmental, perceptual, and sensor classes remain viable.",
+        "caveat": "These records should not be pooled as though “unspecified” were a physical category.",
+    },
+    "Context, testimony, or non-event": {
+        "plain": "Some records preserve policy, correspondence, contact claims, or discussion rather than an observable event.",
+        "likely": "Historical and cultural context, not a class of aerial object.",
+        "caveat": "They are excluded from object-level inference but retained in the explorer.",
+    },
+}
+
+
+def build_phenomenon_profiles(incidents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    total = len(incidents)
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for incident in incidents:
+        grouped[incident["phenomenon_group"]].append(incident)
+    profiles: list[dict[str, Any]] = []
+    for label, rows in sorted(grouped.items(), key=lambda item: len(item[1]), reverse=True):
+        info = PHENOMENON_INTERPRETATIONS[label]
+        mechanisms = Counter(row["mechanism_group"] for row in rows)
+        modes = Counter(row["observation_mode"] for row in rows)
+        years = [row["year"] for row in rows if row["year"]]
+        resolved = sum(
+            row["model_status"] in {"Source-resolved", "Resolved across related records", "Resolved in related investigation records", "Resolved by AARO"}
+            for row in rows
+        )
+        profiles.append(
+            {
+                "label": label,
+                "count": len(rows),
+                "share": ratio(len(rows), total),
+                "median_evidence_score": round(median(row["evidence_score"] for row in rows)),
+                "source_resolved": resolved,
+                "top_mechanisms": [{"label": key, "count": value} for key, value in mechanisms.most_common(3)],
+                "top_modes": [{"label": key, "count": value} for key, value in modes.most_common(3)],
+                "year_start": min(years) if years else None,
+                "year_end": max(years) if years else None,
+                **info,
+            }
+        )
+    return profiles
+
+
+def build_behavior_claims(raw_incidents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    definitions = [
+        (
+            "instant_acceleration",
+            "Instant acceleration",
+            "Most entries preserve a witness or analyst label. A calibrated acceleration needs range, time, platform motion, and continuous tracking.",
+        ),
+        (
+            "abrupt_vector_change",
+            "Abrupt turns",
+            "Sensor pans, reticle behavior, stabilization, and unknown range can convert image-plane movement into an apparent turn.",
+        ),
+        (
+            "transmedium",
+            "Transmedium behavior",
+            "Loss against water, cloud, horizon, or land is not a continuous trajectory through a medium boundary.",
+        ),
+        (
+            "stationary_hover",
+            "Stationary hover",
+            "Near-zero angular motion can describe a distant light, a windborne object, or matched relative motion.",
+        ),
+        (
+            "physical_trace",
+            "Physical trace",
+            "A trace becomes diagnostic only with controlled collection, comparison samples, and an intact chain of custody.",
+        ),
+    ]
+    rows: list[dict[str, Any]] = []
+    for key, label, interpretation in definitions:
+        records = [row for row in raw_incidents if key in (row.get("capability_keys") or [])]
+        rows.append(
+            {
+                "key": key,
+                "label": label,
+                "reported": len(records),
+                "instrument_grade": sum(
+                    str(row.get("measurement_quality")) in {"instrument_derived_values", "calibrated_telemetry"}
+                    for row in records
+                ),
+                "multiple_sensors": sum("multiple_sensors" in (row.get("corroboration_types") or []) for row in records),
+                "direct_water_motion": sum("water_interaction" in (row.get("apparent_motion_class") or []) for row in records),
+                "interpretation": interpretation,
+            }
+        )
+    return rows
+
+
+def build_era_comparison(incidents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    eras = [
+        ("1940–1969", lambda year: year is not None and 1940 <= year < 1970),
+        ("1970–2009", lambda year: year is not None and 1970 <= year < 2010),
+        ("2010–2026", lambda year: year is not None and 2010 <= year <= 2026),
+    ]
+    output: list[dict[str, Any]] = []
+    for label, predicate in eras:
+        rows = [row for row in incidents if predicate(row["year"])]
+        counts = Counter(row["phenomenon_group"] for row in rows)
+        output.append(
+            {
+                "era": label,
+                "total": len(rows),
+                "groups": [{"label": group, "count": count, "share": ratio(count, len(rows))} for group, count in counts.most_common()],
+            }
+        )
+    return output
+
+
+def find_incident(incidents: list[dict[str, Any]], needle: str) -> dict[str, Any] | None:
+    needle = needle.lower()
+    return next((row for row in incidents if needle in row["title"].lower()), None)
+
+
+def build_case_dossiers(incidents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    specs = [
+        {
+            "needle": "DOW UAP D077",
+            "title": "Western U.S. orbs: one event, two conclusions",
+            "tag": "Visual / multi-witness",
+            "claim": "Six federal agents described recurring orange and red orbs near a sensitive site over two dusk periods.",
+            "reconstruction": "Flight, radar, and ADS-B correlation plausibly matches about 60% of the activity to military aircraft dispensing infrared countermeasure flares. The reported long-duration red light and remaining sightings lack imagery or technical measurements.",
+            "conclusion": "Partially explained. The residual is a collection target, not evidence that unrecognized technology was measured.",
+            "refs": ["pursue_western_update", "faa_vision"],
+        },
+        {
+            "needle": "DOW-UAP-PR034",
+            "title": "The “90-degree turns” are not established kinematics",
+            "tag": "Infrared video / Greece",
+            "claim": "A mission report described a target near the ocean making multiple right-angle turns at roughly 80 mph.",
+            "reconstruction": "The released description says the sensor pans, centers, designates, and synchronizes with an area of contrast. Without independent range and platform geometry, motion across the display cannot be converted into the target’s physical vector.",
+            "conclusion": "A target remains unidentified, but the extraordinary turn claim is not demonstrated by the public video.",
+            "refs": ["aaro_imagery_catalog", "aaro_gofast"],
+        },
+        {
+            "needle": "DOW-UAP-PR035",
+            "title": "Disappearing at the coast is not entering the water",
+            "tag": "Infrared video / Greece",
+            "claim": "A small circular target moved over an ocean background and vanished as the view reached land.",
+            "reconstruction": "The object remained an area of contrast until the background changed. It then became visually indistinguishable; the released description does not show a continuous trajectory through the water surface.",
+            "conclusion": "Unresolved small target. The available frames do not support a transmedium interpretation.",
+            "refs": ["aaro_imagery_catalog", "aaro_puerto_rico"],
+        },
+        {
+            "needle": "ICA UAP D001",
+            "title": "Colorado Springs: a large “object” made by light and cloud",
+            "tag": "Five witnesses / resolved",
+            "claim": "Soldiers reported a large, stationary, angular object above Cheyenne Mountain.",
+            "reconstruction": "The source analysis reproduced the geometry as sunlight reflected from snow-covered terrain and backscattered through low cloud, producing an apparently solid luminous area.",
+            "conclusion": "Resolved atmospheric-optical event; no anomalous motion or adversarial capability was recorded.",
+            "refs": ["nasa_uap_study", "faa_vision"],
+        },
+        {
+            "needle": "DOW-UAP-PR070",
+            "title": "Eglin: an anomalous-looking object consistent with a balloon",
+            "tag": "Aircrew / resolved",
+            "claim": "Aircrew reported a rounded object and associated a radar circuit-breaker trip with the encounter.",
+            "reconstruction": "AARO compared geometry, wind, sun angle, pilot accounts, and commercial lighting-balloon tests. The object’s direction and slow speed matched a lighter-than-air target; the electrical fault had a prior history.",
+            "conclusion": "Very likely a balloon-like object; the radar malfunction was probably coincidental.",
+            "refs": ["aaro_eglin"],
+        },
+        {
+            "needle": "Fosterbrook Disc Recovery",
+            "title": "Twin Falls: the recovered “disc” was a planted device",
+            "tag": "Physical recovery / hoax",
+            "claim": "An initial FBI memo described a constructed disc with domes, wiring, coils, and radio tubes.",
+            "reconstruction": "A separate file in the same release records that four boys assembled and planted it from discarded phonograph/jukebox and radio parts; Army inspection found ordinary components.",
+            "conclusion": "Resolved fabrication. The case shows why later records can reverse an impressive initial report.",
+            "refs": ["fbi_ufo_files", "aaro_history_2024"],
+        },
+        {
+            "needle": "Radar Tracking of Unconventional Target near Fort Monmouth",
+            "title": "Fort Monmouth: a genuine radar anomaly without an identity",
+            "tag": "Two radar systems / 1951",
+            "claim": "Operators reported strong returns, rapid azimuth changes, vertical ascent, and speeds above 700 mph over two days.",
+            "reconstruction": "Multiple radar sets make the detection more interesting than a lone visual report, but the public record lacks raw plots, calibration state, propagation analysis, and an independently resolved object.",
+            "conclusion": "A high-value unresolved radar case. Aircraft, propagation, interference, or an unknown target cannot be discriminated publicly.",
+            "refs": ["blue_book_archive", "aaro_annual_2024"],
+        },
+        {
+            "needle": "DOW UAP D101",
+            "title": "Gulf of Oman: the strongest modern residual still lacks released kinematics",
+            "tag": "AC-130 EO/IR / 2021",
+            "claim": "An AC-130 crew reported roughly 25 cold orbs moving in formation and apparently reacting to cannon fire.",
+            "reconstruction": "The official report preserves multiple witnesses, EO/IR observation, and estimated quantities. Yet the public material does not provide the original telemetry needed to test range, four-foot size, acceleration, or causal response to firing.",
+            "conclusion": "Priority unresolved case. Balloons, drones, small objects, and sensor/range effects remain viable alongside a genuinely unidentified target.",
+            "refs": ["nasa_uap_study", "aaro_annual_2024"],
+        },
+        {
+            "needle": "Socorro Police Officer Lonnie Zamora",
+            "title": "Socorro: a close-range residual with imperfect trace evidence",
+            "tag": "Ground visual / 1964",
+            "claim": "Officer Lonnie Zamora described an oval object, two figures, ascent with flame, and ground marks later examined by officials.",
+            "reconstruction": "The event is unusually close-range and includes site effects, but the primary observation is essentially one witness and the public trace record lacks a controlled forensic chain. Prototype activity, misinterpretation, or fabrication remain unexcluded.",
+            "conclusion": "One of the archive’s more interesting historical residuals, but not a verified nonhuman craft.",
+            "refs": ["blue_book_archive", "aaro_history_2024"],
+        },
+        {
+            "needle": "NASA-UAP-D030",
+            "title": "STS-80: an orbital speck without recoverable range",
+            "tag": "Space image / 1996",
+            "claim": "A bright elongated object appears near Earth’s limb in a shuttle photograph.",
+            "reconstruction": "A single image cannot determine whether the object is nearby debris, ice, a reflection, a distant satellite, or something farther away. Relative motion and illumination near a spacecraft can make small nearby material look unusual.",
+            "conclusion": "Unidentified image feature; mission debris or optical effects are the leading classes.",
+            "refs": ["nasa_uap_study"],
+        },
+    ]
+    dossiers: list[dict[str, Any]] = []
+    for spec in specs:
+        record = find_incident(incidents, spec["needle"])
+        if record:
+            dossiers.append({**spec, "record": record})
+    return dossiers
+
+
+def build_residual_cases(incidents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    preferred = [
+        "Radar Tracking of Unconventional Target near Fort Monmouth",
+        "Radar Contact over Oak Ridge",
+        "Rotating Colored Object Sighted Over Godman",
+        "DOW UAP D101",
+        "DOW UAP D038",
+        "DOW-UAP-PR028",
+        "FBI UAP D032",
+        "Socorro Police Officer Lonnie Zamora",
+        "DOW-UAP-PR022",
+        "DOW-UAP-PR026",
+    ]
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for needle in preferred:
+        row = find_incident(incidents, needle)
+        if row and row["id"] not in seen:
+            result.append(row)
+            seen.add(row["id"])
+    return result
+
+
+def build_connection_insights(
+    raw_incidents: list[dict[str, Any]],
+    assessed: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    pre = [row for row in assessed if row["year"] and row["year"] < 1970]
+    modern = [row for row in assessed if row["year"] and row["year"] >= 2010]
+    naked = [row for row in assessed if row["observation_mode"] == "naked_eye_visual"]
+    video = [row for row in assessed if row["observation_mode"] in {"eo_video", "ir_thermal"}]
+    disc_pre = sum(row["phenomenon_group"] == "Disc or oval form" for row in pre)
+    sensor_modern = sum(row["phenomenon_group"] == "Indistinct sensor target" for row in modern)
+    naked_disc = sum(row["phenomenon_group"] == "Disc or oval form" for row in naked)
+    video_blob = sum(row["phenomenon_group"] == "Indistinct sensor target" for row in video)
+    transmedium = [row for row in raw_incidents if "transmedium" in (row.get("capability_keys") or [])]
+    direct_water = sum("water_interaction" in (row.get("apparent_motion_class") or []) for row in transmedium)
+    acceleration = [row for row in raw_incidents if "instant_acceleration" in (row.get("capability_keys") or [])]
+    acceleration_instrument = sum(
+        row.get("measurement_quality") in {"instrument_derived_values", "calibrated_telemetry"} for row in acceleration
+    )
+    return [
+        {
+            "kind": "Connect",
+            "title": "The observation system shapes the reported object",
+            "evidence": (
+                f"{disc_pre} pre-1970 rows are disc/oval reports, while {sensor_modern} records since 2010 are indistinct sensor targets. "
+                f"Naked-eye observations produce {naked_disc} disc cases; EO/IR video produces {video_blob} contrast-target cases."
+            ),
+            "meaning": "The changing morphology tracks human instruments and vocabulary more closely than a stable vehicle design.",
+        },
+        {
+            "kind": "Connect",
+            "title": "Apparent performance repeatedly depends on missing range",
+            "evidence": (
+                f"{len(acceleration)} rows carry an instant-acceleration label, but only {acceleration_instrument} has instrument-grade values. "
+                "Worked resolutions such as GoFast show how motion parallax converts ordinary speed into dramatic apparent speed."
+            ),
+            "meaning": "The archive establishes many impressions of acceleration, but almost no reproducible acceleration measurements.",
+        },
+        {
+            "kind": "Connect",
+            "title": "“Transmedium” is usually an inference at an occlusion boundary",
+            "evidence": (
+                f"{len(transmedium)} rows carry a transmedium capability label; only {direct_water} records a direct water-interaction motion class. "
+                "The Greece PR-035 target simply loses contrast when the background changes."
+            ),
+            "meaning": "Disappearances near water or cloud should not be promoted to medium crossings without continuous range-resolved tracking.",
+        },
+        {
+            "kind": "Do not connect",
+            "title": "Repeated shapes do not establish a common craft",
+            "evidence": "“Orb,” “disc,” and “tic-tac” pool events separated by decades, sensors, distances, lighting, and levels of detail.",
+            "meaning": "Morphology is useful for organizing reports, but it is too underdetermined to infer one manufacturer, operator, or technology.",
+        },
+        {
+            "kind": "Do not connect",
+            "title": "Operational hotspots are also sensor-and-mission hotspots",
+            "evidence": "Modern clusters concentrate around CENTCOM, maritime patrol, training ranges, and sensitive installations where observing systems and reporting channels are active.",
+            "meaning": "A map of reports is not automatically a map of object origins or intent.",
+        },
+        {
+            "kind": "Connect",
+            "title": "Later records can reverse an early mystery",
+            "evidence": "Fosterbrook and Maury Island look stronger when the initial recovery or debris memo is read alone; related files supply admissions, ordinary components, or slag findings.",
+            "meaning": "Cross-record chronology is often more probative than the most dramatic single page.",
+        },
+    ]
+
+
 def build_analysis(
     analysis: dict[str, Any],
     manifest: dict[str, Any] | None,
@@ -801,6 +1437,12 @@ def build_analysis(
     raw_documents = list(analysis.get("documents") or [])
     assessed_incidents = [assess_record(record) for record in raw_incidents]
     assessed_reports = aggregate_source_reports(raw_documents, assessed_incidents)
+    phenomenon_profiles = build_phenomenon_profiles(assessed_incidents)
+    behavior_claims = build_behavior_claims(raw_incidents)
+    case_dossiers = build_case_dossiers(assessed_incidents)
+    residual_cases = build_residual_cases(assessed_incidents)
+    connection_insights = build_connection_insights(raw_incidents, assessed_incidents)
+    era_comparison = build_era_comparison(assessed_incidents)
 
     total = len(raw_incidents)
     instrument_grade = sum(
@@ -817,6 +1459,15 @@ def build_analysis(
     )
     no_corroboration = sum(set(record.get("corroboration_types") or []) in (set(), {"none_stated"}) for record in raw_incidents)
     high_information = sum(record["evidence_band"] == "High-information" for record in assessed_incidents)
+    source_resolved = sum(
+        record["model_status"] in {
+            "Source-resolved",
+            "Resolved across related records",
+            "Resolved in related investigation records",
+            "Resolved by AARO",
+        }
+        for record in assessed_incidents
+    )
     follow_up = sum(
         record["assessment"] in {"Unresolved — stronger public evidence", "Unresolved — follow-up warranted", "Mixed — partially explained, remainder unresolved"}
         for record in assessed_incidents
@@ -868,16 +1519,31 @@ def build_analysis(
             "high_information": high_information,
             "high_information_rate": ratio(high_information, total),
             "follow_up_candidates": follow_up,
+            "source_resolved": source_resolved,
+            "residual_case_count": len(residual_cases),
             "verified_exotic_technology": 0,
         },
         "verdict": {
-            "headline": "The corpus documents a real identification problem—not verified exotic technology.",
+            "headline": "The reports do not describe one phenomenon; they describe recurring ways ordinary objects and ambiguous observations become extraordinary-looking.",
             "summary": (
-                "Most public records remain unresolved because decisive geometry, calibration, metadata, or independent corroboration is missing. "
-                "Where comparable cases have sufficient data, ordinary objects and sensor/viewing effects repeatedly explain the apparent anomaly. "
-                "A small subset merits disciplined follow-up, but no public record in this corpus crosses the evidentiary threshold for a novel-technology claim."
+                "Historical discs are primarily visual-era reports; modern military cases are usually unresolved contrast targets; night orbs are distant lights without range; "
+                "and many spectacular motion claims weaken when sensor motion, parallax, contrast loss, or missing geometry is considered. "
+                "Some radar, close-range, and multisensor cases remain worth investigating, but no released case verifies exotic technology."
             ),
             "confidence": "Moderate-to-high for the corpus-level conclusion; low-to-moderate for many individual identities.",
+        },
+        "phenomenon_story": {
+            "answer": (
+                "The best-supported explanation is a heterogeneous mixture: aircraft and military activity, balloons and small airborne objects, "
+                "astronomical and atmospheric lights, sensor/viewing effects, mission debris, and occasional fabrication. "
+                "The remaining residue is heterogeneous too; it does not converge on one craft shape, behavior, geography, or operating signature."
+            ),
+            "profiles": phenomenon_profiles,
+            "behavior_claims": behavior_claims,
+            "era_comparison": era_comparison,
+            "connections": connection_insights,
+            "case_dossiers": case_dossiers,
+            "residual_cases": residual_cases,
         },
         "definitions": [
             {
@@ -900,6 +1566,8 @@ def build_analysis(
         "distributions": {
             "assessment": count_values(assessed_incidents, "assessment"),
             "best_fit_explanation": count_values(assessed_incidents, "best_fit_explanation"),
+            "phenomenon_group": count_values(assessed_incidents, "phenomenon_group"),
+            "mechanism_group": count_values(assessed_incidents, "mechanism_group"),
             "evidence_band": count_values(assessed_incidents, "evidence_band"),
             "measurement_quality": count_values(raw_incidents, "measurement_quality"),
             "resolution_status": count_values(raw_incidents, "resolution_status"),
@@ -927,30 +1595,39 @@ def build_analysis(
         "sources": REFERENCE_SOURCES,
         "chart_map": [
             {
-                "section": "Evidence sufficiency",
-                "question": "How much of the corpus can support quantitative reconstruction?",
+                "section": "Reported phenomena",
+                "question": "What types of objects or effects did witnesses and sensors actually describe?",
                 "family": "Composition",
                 "type": "stacked bar",
-                "fields": ["measurement_quality", "count"],
-                "takeaway": "Non-quantitative records dominate.",
-                "palette": "gold / teal / neutral",
+                "fields": ["phenomenon_group", "count", "share"],
+                "takeaway": "The reports divide into distinct observation families rather than one stable craft type.",
+                "palette": "relaxed multi-category, five roots plus neutral Other",
+            },
+            {
+                "section": "Extraordinary behavior",
+                "question": "How often do extraordinary-performance labels have instrument-grade support?",
+                "family": "Comparison",
+                "type": "paired horizontal bars",
+                "fields": ["behavior", "reported", "instrument_grade"],
+                "takeaway": "Reported extraordinary behavior greatly exceeds physically measured behavior.",
+                "palette": "hard two-root cap: gold reports, teal instrument-grade subset",
             },
             {
                 "section": "Timeline",
-                "question": "How do released incident records and information quality vary by decade?",
-                "family": "Trend",
-                "type": "stacked columns",
-                "fields": ["decade", "limited", "moderate", "high"],
-                "takeaway": "Volume tracks historical/reporting programs and modern releases, not an unbiased event rate.",
-                "palette": "teal / gold / neutral",
+                "question": "How does the reported phenomenon change with era and observing system?",
+                "family": "Composition over time",
+                "type": "grouped decade columns",
+                "fields": ["decade", "phenomenon_group", "count"],
+                "takeaway": "Visual-era discs give way to modern sensor-only contrast targets.",
+                "palette": "same phenomenon palette as the composition chart",
             },
             {
-                "section": "Assessment outcomes",
-                "question": "What conclusions are supportable after applying the evidence gate?",
+                "section": "Leading mechanisms",
+                "question": "Which physical or observational explanation families best fit the reports?",
                 "family": "Comparison & ranking",
                 "type": "horizontal bar",
-                "fields": ["assessment", "count"],
-                "takeaway": "Insufficient-data unresolved cases are more common than stronger-evidence unresolved cases.",
+                "fields": ["mechanism_group", "count"],
+                "takeaway": "Conventional objects plus range, sensor, and perceptual ambiguity explain the largest groups.",
                 "palette": "single-root teal with gold focal",
             },
         ],
