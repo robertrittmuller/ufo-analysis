@@ -1,8 +1,8 @@
 # UFO Analysis Dashboard
 
-A static, self-contained research dashboard for exploring U.S. government UAP/UFO release material. The project downloads source media, extracts text from PDFs/images/audio/video, enriches records with local model review, and builds `dashboard/index.html` plus a structured JSON analysis file.
+A static, self-contained research dashboard for exploring U.S. government UAP/UFO release material. The project downloads source media, extracts text from PDFs/images/audio/video, enriches records with local model review, and builds `dashboard/index.html` plus a structured JSON analysis file. A complementary scientific evidence review at `dashboard/scientific-analysis.html` audits every report and incident using an explicit evidence-sufficiency model.
 
-The current generated analysis covers 221 physical source files, 534 flattened analysis items, and 4,281 source pages across PDF, image, video, and audio material. The dashboard is designed to be served as static files, so it can run locally or deploy to Cloudflare Workers Static Assets without a backend.
+The current generated analysis covers 377 physical source files, 621 flattened incident records, and 8,678 source pages across PDF, image, video, and audio material. The dashboards are designed to be served as static files, so they can run locally or deploy to Cloudflare Workers Static Assets without a backend.
 
 View the [live dashboard](https://ufo-analysis.rittmuller.com/).
 
@@ -44,6 +44,7 @@ This repository is an independent analysis and dashboard project. It is not affi
 - Classifies records into evidence categories, themes, agencies, trend fields, and capability signals.
 - Uses embeddings to identify related sources and shared factors.
 - Produces a single static HTML dashboard with embedded JSON.
+- Produces an interactive scientific companion with corpus-level findings, an evidence timeline, case reconstructions, cited primary research, and a searchable assessment for every source report and incident.
 - Includes Cloudflare Workers Static Assets configuration.
 
 ## Repository Layout
@@ -51,8 +52,10 @@ This repository is an independent analysis and dashboard project. It is not affi
 | Path | Purpose |
 |---|---|
 | `dashboard/index.html` | Generated self-contained dashboard. |
+| `dashboard/scientific-analysis.html` | Generated interactive scientific evidence review. |
 | `dashboard/assets/` | Static dashboard assets. |
 | `tools/build_dashboard.py` | Main analysis and dashboard build pipeline. |
+| `tools/build_scientific_analysis.py` | Deterministic evidence audit and companion-report builder. |
 | `tools/download_ufo_reports.py` | Downloads source media and writes `source_manifest.json`. |
 | `tools/ocr_with_llm.py` | Standalone PDF/image OCR helper backed by a local multimodal model. |
 | `tools/assets/ne_110m_land.geojson` | GeoJSON used for dashboard mapping/geographic context. |
@@ -98,6 +101,14 @@ The build writes:
 - `dashboard/index.html`
 - `data/processed/ufo_dashboard_analysis.json`
 - cache files under `data/processed/`
+
+Build the scientific companion from the canonical analysis JSON:
+
+```sh
+python3 tools/build_scientific_analysis.py
+```
+
+This writes `dashboard/scientific-analysis.html` and the auditable intermediate assessment at `data/processed/scientific_assessment.json`.
 
 Open the generated dashboard directly in a browser, or serve the folder locally:
 

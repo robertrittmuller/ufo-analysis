@@ -178,6 +178,28 @@
       overflow-wrap: anywhere;
     }
 
+    .analysis-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 22px;
+      padding: 12px 15px;
+      border: 1px solid rgba(86, 214, 201, 0.42);
+      color: var(--teal);
+      text-decoration: none;
+      font-size: 0.72rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      background: rgba(86, 214, 201, 0.06);
+      transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+    }
+
+    .analysis-cta:hover {
+      background: var(--teal);
+      color: var(--void);
+      transform: translateY(-1px);
+    }
+
     .hero-meta {
       display: grid;
       grid-template-columns: repeat(3, minmax(120px, 1fr)) minmax(230px, 1.35fr);
@@ -1653,6 +1675,7 @@
           <div class="eyebrow">Research Dashboard</div>
           <h1>UAP/UFO Research</h1>
           <p class="subtitle">This dashboard organizes the public war.gov/ufo archive of unresolved UAP records released by the Department of War with ODNI support. The collection spans decades of historical government files, many reviewed from paper records, and the cases remain unresolved because the government has not made a definitive determination about the observed phenomena.</p>
+          <a class="analysis-cta" href="scientific-analysis.html">Open scientific evidence review <span aria-hidden="true">→</span></a>
         </div>
         <div class="hero-meta">
           <span id="metaDocs"></span>

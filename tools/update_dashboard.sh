@@ -30,4 +30,7 @@ echo "Rebuilding dashboard in hybrid mode with review timeout ${REVIEW_TIMEOUT}s
   --embedding-base-url "${EMBEDDING_BASE_URL}" \
   --embedding-model "${EMBEDDING_MODEL}"
 
+echo "Rebuilding the scientific evidence review..."
+"${PYTHON}" tools/build_scientific_analysis.py
+
 echo "Dashboard update complete."
