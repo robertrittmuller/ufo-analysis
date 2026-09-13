@@ -177,9 +177,20 @@ cp .env.example .env
 | `UFO_REVIEW_BASE_URL` | `http://localhost:4321/v1` |
 | `UFO_REVIEW_API_KEY` | unset |
 | `UFO_REVIEW_MODEL` | `Qwen3.6-35B-A3B-UD-MLX-4bit` |
+| `UFO_AUDIO_TRANSCRIPT_MODEL` | `Qwen3-ASR-0.6B-4bit` |
 | `UFO_EMBEDDING_BASE_URL` | falls back to `UFO_REVIEW_BASE_URL` |
 | `UFO_EMBEDDING_API_KEY` | falls back to `UFO_REVIEW_API_KEY` |
 | `UFO_EMBEDDING_MODEL` | `Qwen3-Embedding-0.6B-4bit-DWQ` |
+
+Review and PDF/image OCR share `UFO_REVIEW_MODEL`. Audio transcription uses
+`UFO_AUDIO_TRANSCRIPT_MODEL`, and related-source matching uses `UFO_EMBEDDING_MODEL`.
+Audio transcription shares the review endpoint and API key.
+
+Both shell entry points (`tools/update_dashboard.sh` and
+`tools/reprocess_manifest_subset.sh`) use these `.env` settings. Existing exported
+environment variables take precedence over `.env`; explicitly supplied legacy
+`REVIEW_BASE_URL`, `REVIEW_MODEL`, `EMBEDDING_BASE_URL`, and `EMBEDDING_MODEL`
+shell overrides remain supported.
 
 Command-line flags still override the `.env` values:
 

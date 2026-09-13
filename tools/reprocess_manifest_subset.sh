@@ -12,10 +12,20 @@ fi
 
 MANIFEST_MATCH="${MANIFEST_MATCH:-061226/release_03}"
 REVIEW_TIMEOUT="${REVIEW_TIMEOUT:-900}"
-REVIEW_BASE_URL="${REVIEW_BASE_URL:-http://localhost:4321/v1}"
-REVIEW_MODEL="${REVIEW_MODEL:-Qwen3.6-35B-A3B-UD-MLX-4bit}"
-EMBEDDING_BASE_URL="${EMBEDDING_BASE_URL:-http://localhost:4321/v1}"
-EMBEDDING_MODEL="${EMBEDDING_MODEL:-Qwen3-Embedding-0.6B-4bit-DWQ}"
+# Let the Python entry point load .env; forward only explicit legacy overrides.
+MODEL_ARGS=()
+if [[ -n "${REVIEW_BASE_URL:-}" ]]; then
+  MODEL_ARGS+=(--review-base-url "${REVIEW_BASE_URL}")
+fi
+if [[ -n "${REVIEW_MODEL:-}" ]]; then
+  MODEL_ARGS+=(--review-model "${REVIEW_MODEL}")
+fi
+if [[ -n "${EMBEDDING_BASE_URL:-}" ]]; then
+  MODEL_ARGS+=(--embedding-base-url "${EMBEDDING_BASE_URL}")
+fi
+if [[ -n "${EMBEDDING_MODEL:-}" ]]; then
+  MODEL_ARGS+=(--embedding-model "${EMBEDDING_MODEL}")
+fi
 DRY_RUN="${DRY_RUN:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 
@@ -104,13 +114,10 @@ if [[ "${SKIP_BUILD}" == "1" ]]; then
   exit 0
 fi
 
-echo "Rebuilding dashboard in hybrid mode with localhost review and embedding models..."
+echo "Rebuilding dashboard in hybrid mode with configured review and embedding models..."
 "${PYTHON}" tools/build_dashboard.py \
   --review-mode hybrid \
   --review-timeout "${REVIEW_TIMEOUT}" \
-  --review-base-url "${REVIEW_BASE_URL}" \
-  --review-model "${REVIEW_MODEL}" \
-  --embedding-base-url "${EMBEDDING_BASE_URL}" \
-  --embedding-model "${EMBEDDING_MODEL}"
+  ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"}
 
 echo "Subset reprocess complete."

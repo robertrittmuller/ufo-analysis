@@ -11,10 +11,20 @@ else
 fi
 
 REVIEW_TIMEOUT="${REVIEW_TIMEOUT:-900}"
-REVIEW_BASE_URL="${REVIEW_BASE_URL:-http://localhost:4321/v1}"
-REVIEW_MODEL="${REVIEW_MODEL:-Qwen3.6-35B-A3B-UD-MLX-4bit}"
-EMBEDDING_BASE_URL="${EMBEDDING_BASE_URL:-http://localhost:4321/v1}"
-EMBEDDING_MODEL="${EMBEDDING_MODEL:-Qwen3-Embedding-0.6B-4bit-DWQ}"
+# Let the Python entry point load .env; forward only explicit legacy overrides.
+MODEL_ARGS=()
+if [[ -n "${REVIEW_BASE_URL:-}" ]]; then
+  MODEL_ARGS+=(--review-base-url "${REVIEW_BASE_URL}")
+fi
+if [[ -n "${REVIEW_MODEL:-}" ]]; then
+  MODEL_ARGS+=(--review-model "${REVIEW_MODEL}")
+fi
+if [[ -n "${EMBEDDING_BASE_URL:-}" ]]; then
+  MODEL_ARGS+=(--embedding-base-url "${EMBEDDING_BASE_URL}")
+fi
+if [[ -n "${EMBEDDING_MODEL:-}" ]]; then
+  MODEL_ARGS+=(--embedding-model "${EMBEDDING_MODEL}")
+fi
 
 cd "${REPO_ROOT}"
 
@@ -25,10 +35,7 @@ echo "Rebuilding dashboard in hybrid mode with review timeout ${REVIEW_TIMEOUT}s
 "${PYTHON}" tools/build_dashboard.py \
   --review-mode hybrid \
   --review-timeout "${REVIEW_TIMEOUT}" \
-  --review-base-url "${REVIEW_BASE_URL}" \
-  --review-model "${REVIEW_MODEL}" \
-  --embedding-base-url "${EMBEDDING_BASE_URL}" \
-  --embedding-model "${EMBEDDING_MODEL}"
+  ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"}
 
 echo "Rebuilding the scientific evidence review..."
 "${PYTHON}" tools/build_scientific_analysis.py

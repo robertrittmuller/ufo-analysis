@@ -953,7 +953,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--audio-transcript-model",
-        default="Qwen3-ASR-0.6B-4bit",
+        default=os.getenv("UFO_AUDIO_TRANSCRIPT_MODEL", "Qwen3-ASR-0.6B-4bit"),
         help="Local speech-to-text model name for audio transcription.",
     )
     parser.add_argument(
