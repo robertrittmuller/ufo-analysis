@@ -1,546 +1,143 @@
-# UFO Analysis Dashboard
+# UAP Files Research Dashboard
 
-A static, self-contained research dashboard for exploring U.S. government UAP/UFO release material. The project downloads source media, extracts text from PDFs/images/audio/video, enriches records with local model review, and builds `dashboard/index.html` plus a structured JSON analysis file. A complementary report-by-report scientific analysis at `dashboard/scientific-analysis.html` reconstructs the reported phenomena, tests physical explanations, connects defensible patterns, and identifies the cases that remain unresolved.
+An interactive research dashboard for the U.S. Department of War [PURSUE](https://www.war.gov/ufo/) UAP/UFO file releases. The pipeline downloads every released document, image, video and audio file, transcribes it, writes a page-cited deep analysis report for each file, and publishes a static site:
 
-The current generated analysis covers 377 physical source files, 621 flattened incident records, and 8,678 source pages across PDF, image, video, and audio material. The dashboards are designed to be served as static files, so they can run locally or deploy to Cloudflare Workers Static Assets without a backend.
+- **Overview** – corpus synthesis, incident timeline and map, explanation and evidence breakdowns, data-quality panel.
+- **Reports** – one deep report per released file: summary and key points with page citations, every incident in the file, the record's own conclusion kept separate from a machine assessment, provenance and redaction details, people and entities, related reports, and a page-by-page source-text reader.
+- **Incidents** – every extracted observation event, filterable and exportable (CSV/JSON).
+- **People & orgs**, **full-text search** over all page text, and a **methods** page.
 
 View the [live dashboard](https://ufo-analysis.rittmuller.com/).
 
-## Contents
+This is an independent project. It is not affiliated with, endorsed by, or operated by any government agency. Summaries, classifications and assessments are machine-generated research aids; check the cited page of the original file before quoting or relying on a claim.
 
-- [Project Status](#project-status)
-- [Data Source](#data-source)
-- [Features](#features)
-- [Repository Layout](#repository-layout)
-- [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
-- [Working With Source Data](#working-with-source-data)
-- [Local Model Configuration](#local-model-configuration)
-- [Dashboard Build Options](#dashboard-build-options)
-- [Deployment](#deployment)
-- [Data and Publishing Notes](#data-and-publishing-notes)
-- [Data Processing Pipeline](#data-processing-pipeline)
-- [License](#license)
+## How it works
 
-## Project Status
+```
+download ─▶ extract ─▶ analyze ─▶ embed ─▶ build
+war.gov     OCR,        deep       related    static site data
+manifest    frames,     report     reports,   (dashboard/data)
+            audio       per file   same event
+```
 
-This repository is a static dashboard and data-processing pipeline, not a claim-validation system. The analysis uses source metadata, OCR, heuristic classification, and local AI review to organize a public document corpus for research. Review outputs should be treated as generated research aids and checked against the original source files before citation.
+| Stage | What it does | Models |
+|---|---|---|
+| `download` | Reads the war.gov CSV manifest and DVIDS metadata, downloads files to a temp name, validates them (size, file signature) and records a checksum. One bad row never aborts the run. | – |
+| `extract` | Every scanned PDF page and image is transcribed by a vision model, which also notes handwriting, redactions, markings and pictures. Born-digital pages use their native text. Video is sampled into frames that are described; audio is transcribed in full in 60-second chunks, plus official captions where available. | Remote → local → Tesseract → embedded text layer (OCR). Local → remote (audio). |
+| `analyze` | Reads the whole text in page-aligned parts (nothing is sampled), extracts constituent records, incidents, entities and key passages, then writes the file-level report. Quotes are checked against page text; dates and places are normalised. | Remote → local |
+| `embed` | Embeds reports and incidents to link related reports and the same event described in different files. | Local |
+| `build` | Writes `dashboard/data/` – a compact index, one JSON per report (loaded on demand), full-text search shards, frame thumbnails – and a corpus synthesis. | Remote → local |
 
-The raw `data/` directory is ignored by Git because it can grow very large. A full local corpus currently occupies about 11 GB. The generated dashboard in `dashboard/` is small enough to publish as static assets, but it embeds the generated analysis JSON directly in `dashboard/index.html`.
+Every stage is **resumable**. Results are cached by file content and settings, a failed page or part is never cached as if it had succeeded, and re-running a stage redoes only missing or failed work. Each result records which model or fallback produced it; the published dashboard shows only the type of model (for example, remote vision-language model or local speech-recognition model), never the specific model name, per page and per report.
 
-## Data Source
-
-The source corpus comes from the U.S. Department of War's [Presidential Unsealing and Reporting System for UAP Encounters (PURSUE)](https://www.war.gov/ufo/) release page. The downloader reads the page's public CSV manifest, downloads linked PDFs/images/media files, and enriches video/audio records with DVIDS metadata when available.
-
-This repository is an independent analysis and dashboard project. It is not affiliated with, endorsed by, or operated by the U.S. Department of War or any other government agency.
-
-## Features
-
-- Downloads UFO/UAP release media from the war.gov source manifest.
-- Handles PDFs, images, video clips, and audio-like media assets.
-- Extracts native PDF text with PyMuPDF and falls back to OCR when page text is sparse.
-- Uses Tesseract and a local OpenAI-compatible multimodal model for OCR/review workflows.
-- Splits recognized archival bundles into incident-level records.
-- Classifies records into evidence categories, themes, agencies, trend fields, and capability signals.
-- Uses embeddings to identify related sources and shared factors.
-- Produces a single static HTML dashboard with embedded JSON.
-- Produces an interactive scientific companion with corpus-level findings, an evidence timeline, case reconstructions, cited primary research, and a searchable assessment for every source report and incident.
-- Includes Cloudflare Workers Static Assets configuration.
-
-## Repository Layout
-
-| Path | Purpose |
-|---|---|
-| `dashboard/index.html` | Generated self-contained dashboard. |
-| `dashboard/scientific-analysis.html` | Generated interactive scientific evidence review. |
-| `dashboard/assets/` | Static dashboard assets. |
-| `tools/build_dashboard.py` | Main analysis and dashboard build pipeline. |
-| `tools/build_scientific_analysis.py` | Deterministic evidence audit and companion-report builder. |
-| `tools/download_ufo_reports.py` | Downloads source media and writes `source_manifest.json`. |
-| `tools/ocr_with_llm.py` | Standalone PDF/image OCR helper backed by a local multimodal model. |
-| `tools/assets/ne_110m_land.geojson` | GeoJSON used for dashboard mapping/geographic context. |
-| `data/sources/` | Downloaded source media. Ignored by Git. |
-| `data/ocr_markdown/` | Markdown OCR outputs used by the builder. Ignored by Git. |
-| `data/processed/` | Generated caches and final analysis JSON. Ignored by Git. |
-| `data/reviewed/` | Manual/generated review overrides. Ignored by Git. |
-| `requirements.txt` | Python package dependencies. |
-| `wrangler.toml` | Cloudflare Workers Static Assets config. |
-
-## Prerequisites
-
-Python dependencies:
+## Setup
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+brew install ffmpeg tesseract        # macOS; required for video/audio and the OCR fallback
+cp .env.example .env                 # then fill in endpoints and keys
 ```
 
-System tools used by the full pipeline:
+### Model configuration (`.env`)
 
-- `ffmpeg` and `ffprobe` for video/audio metadata, frame extraction, and audio extraction.
-- Tesseract OCR for image OCR fallback.
-- Node.js and `wrangler` only if deploying or previewing with Cloudflare.
+The pipeline uses three types of model, all served through OpenAI-compatible APIs: **vision-language models** (multimodal LLMs) for OCR, analysis and report writing, a **speech-recognition model** for audio transcription, and a **text-embedding model** for linking related reports. Any models of these types can be configured.
 
-On macOS, the system tools can be installed with Homebrew:
+| Variable | Role |
+|---|---|
+| `REMOTE_UFO_REVIEW_BASE_URL`, `REMOTE_UFO_REVIEW_API_KEY`, `REMOTE_UFO_REVIEW_MODEL` | Primary model for OCR, analysis and report generation (OpenAI-compatible, vision-capable). |
+| `REMOTE_UFO_AUDIO_TRANSCRIPT_MODEL` | Remote backup for audio transcription. Optional. |
+| `LOCAL_UFO_REVIEW_BASE_URL`, `LOCAL_UFO_REVIEW_API_KEY` | Local OpenAI-compatible server. |
+| `LOCAL_UFO_REVIEW_MODEL` | Local backup for OCR and analysis. Optional but recommended. |
+| `LOCAL_UFO_AUDIO_TRANSCRIPT_MODEL` | Primary audio transcription model (local). |
+| `LOCAL_UFO_EMBEDDING_MODEL` | Embedding model (local). |
+| `REMOTE_UFO_OCR_PARAMS`, `REMOTE_UFO_EXTRACT_PARAMS`, `REMOTE_UFO_SYNTHESIS_PARAMS` | Optional JSON merged into the request for each task, e.g. to switch off hidden reasoning for transcription. If the server rejects them the request is retried without. |
+| `UFO_OCR_CONCURRENCY`, `UFO_ANALYSIS_CONCURRENCY`, `UFO_REQUEST_TIMEOUT`, `UFO_SITE_URL` | Optional tuning. |
+
+A preflight check runs before any stage. It verifies `ffmpeg`, `ffprobe`, `tesseract` and every configured endpoint and model, stops if a stage could not produce valid output, and warns when a backup is unavailable:
 
 ```sh
-brew install ffmpeg tesseract
+python -m ufo_pipeline check
 ```
 
-## Quick Start
-
-If `data/` already exists locally, rebuild the dashboard:
+## Running
 
 ```sh
-python3 tools/build_dashboard.py
+python -m ufo_pipeline all        # download + extract + analyze + embed + build
+python -m ufo_pipeline process    # everything except download
+tools/update_dashboard.sh         # download, then process (continues if some downloads fail)
 ```
 
-The build writes:
+Individual stages: `download`, `extract`, `analyze`, `embed`, `build`.
 
-- `dashboard/index.html`
-- `data/processed/ufo_dashboard_analysis.json`
-- cache files under `data/processed/`
+Useful options:
 
-Build the scientific companion from the canonical analysis JSON:
+| Option | Purpose |
+|---|---|
+| `--only TEXT` | Only sources whose filename contains TEXT (repeatable). |
+| `--limit N`, `--page-limit N` | Scratch runs on a subset. |
+| `--force` | Ignore caches for the selected stage and sources. |
+| `--site-dir DIR` | Write the site data somewhere else. Required for partial builds – a subset is never published into `dashboard/`. |
+| `--no-corpus-summary` | Skip the model-written corpus synthesis in `build`. |
+| `--prune-orphans` | `download`: move files that are not in the manifest to `data/orphaned/`. |
+
+A full first run over the whole corpus is long (many hours): it is bounded by how fast the remote model generates text. It can be interrupted and restarted at any time.
+
+Scratch build of a few files:
 
 ```sh
-python3 tools/build_scientific_analysis.py
+python -m ufo_pipeline process --only CIA-UAP-D027 --only DOW-UAP-PR055 --site-dir data/scratch-site
+cp -R dashboard/index.html dashboard/favicon.svg dashboard/assets data/scratch-site/
+python3 -m http.server 8766 --directory data/scratch-site
 ```
 
-This writes `dashboard/scientific-analysis.html` and the auditable intermediate assessment at `data/processed/scientific_assessment.json`.
+## Viewing and deploying
 
-Open the generated dashboard directly in a browser, or serve the folder locally:
+The site loads its data with `fetch`, so serve the folder rather than opening the file directly:
 
 ```sh
 python3 -m http.server 8000 --directory dashboard
 ```
 
-Then visit `http://localhost:8000`.
-
-For a small scratch build while developing, write outputs outside the canonical dashboard paths:
-
-```sh
-python3 tools/build_dashboard.py \
-  --max-docs 5 \
-  --page-limit 2 \
-  --output-html data/processed/scratch/index.html \
-  --output-json data/processed/scratch/analysis.json
-```
-
-The builder intentionally rejects limited runs that target the canonical `dashboard/index.html` and `data/processed/ufo_dashboard_analysis.json` paths.
-
-## Working With Source Data
-
-Download source media and create the manifest:
-
-```sh
-python3 tools/download_ufo_reports.py
-```
-
-Useful variants:
-
-```sh
-python3 tools/download_ufo_reports.py --media-types pdf,image
-python3 tools/download_ufo_reports.py --max-files 10
-python3 tools/download_ufo_reports.py --overwrite-existing
-```
-
-The downloader writes media into `data/sources/` and metadata into `data/processed/source_manifest.json`.
-
-Run standalone LLM OCR for a document:
-
-```sh
-python3 tools/ocr_with_llm.py \
-  data/sources/38_143685_box7_Incident_Summaries_1-100.pdf \
-  --pages 1 \
-  --output-dir data/ocr_markdown
-```
-
-OCR options:
-
-- `--pages` accepts selections such as `1`, `1-3`, or `1,4,8-10`.
-- `--concurrency` controls simultaneous local model requests. Default: `4`.
-- `--pages-per-request` controls how many page images are sent per model call. Default: `1`.
-- Existing Markdown outputs are skipped unless `--overwrite` is passed.
-
-## Local Model Configuration
-
-Local model settings are loaded from an ignored `.env` file when present. Copy the safe example, then enter the endpoint and credential for your own model server:
-
-```sh
-cp .env.example .env
-```
-
-| Environment variable | Safe default |
-|---|---|
-| `UFO_REVIEW_BASE_URL` | `http://localhost:4321/v1` |
-| `UFO_REVIEW_API_KEY` | unset |
-| `UFO_REVIEW_MODEL` | `Qwen3.6-35B-A3B-UD-MLX-4bit` |
-| `UFO_AUDIO_TRANSCRIPT_MODEL` | `Qwen3-ASR-0.6B-4bit` |
-| `UFO_EMBEDDING_BASE_URL` | falls back to `UFO_REVIEW_BASE_URL` |
-| `UFO_EMBEDDING_API_KEY` | falls back to `UFO_REVIEW_API_KEY` |
-| `UFO_EMBEDDING_MODEL` | `Qwen3-Embedding-0.6B-4bit-DWQ` |
-
-Review and PDF/image OCR share `UFO_REVIEW_MODEL`. Audio transcription uses
-`UFO_AUDIO_TRANSCRIPT_MODEL`, and related-source matching uses `UFO_EMBEDDING_MODEL`.
-Audio transcription shares the review endpoint and API key.
-
-Both shell entry points (`tools/update_dashboard.sh` and
-`tools/reprocess_manifest_subset.sh`) use these `.env` settings. Existing exported
-environment variables take precedence over `.env`; explicitly supplied legacy
-`REVIEW_BASE_URL`, `REVIEW_MODEL`, `EMBEDDING_BASE_URL`, and `EMBEDDING_MODEL`
-shell overrides remain supported.
-
-Command-line flags still override the `.env` values:
-
-```sh
-python3 tools/build_dashboard.py \
-  --review-base-url http://localhost:4321/v1 \
-  --review-model Qwen3.6-35B-A3B-UD-MLX-4bit \
-  --embedding-base-url http://localhost:4321/v1 \
-  --embedding-model Qwen3-Embedding-0.6B-4bit-DWQ
-```
-
-To build from already prepared OCR/review data without generating new model reviews:
-
-```sh
-python3 tools/build_dashboard.py \
-  --review-mode manual \
-  --related-sources-mode off \
-  --audio-transcript-mode captions
-```
-
-That mode is useful for public or reproducible runs, but it depends on the required `data/` artifacts already existing locally.
-
-## Dashboard Build Options
-
-Common builder flags:
-
-| Flag | Purpose |
-|---|---|
-| `--source-dir` | Source media directory. Default: `data/sources`. |
-| `--output-html` | Dashboard HTML output path. Default: `dashboard/index.html`. |
-| `--output-json` | Analysis JSON output path. Default: `data/processed/ufo_dashboard_analysis.json`. |
-| `--site-url` | Canonical public URL used for SEO metadata, `robots.txt`, and `sitemap.xml`. |
-| `--review-mode manual|hybrid` | Use only saved reviews or generate missing reviews with the local model. |
-| `--refresh-reviews` | Regenerate local model reviews in hybrid mode. |
-| `--refresh-document-cache` | Ignore cached document analyses and rebuild them. |
-| `--refresh-ocr-markdown` | Regenerate Markdown OCR files before use. |
-| `--related-sources-mode auto|off` | Enable or disable embedding-based related source links. |
-| `--max-docs` | Limit the number of documents for scratch runs. |
-| `--page-limit` | Limit pages per document for scratch runs. |
-| `--no-split-source-pdfs` | Keep recognized archival bundles as single source documents. |
-| `--min-native-chars` | Native PDF text threshold below which OCR fallback is used. Default: `120`. |
-
-## Deployment
-
-This project is configured for Cloudflare Workers Static Assets. Cloudflare uploads the already-built files in `dashboard/`; it does not run the Python build pipeline.
-
-Deploy the current dashboard:
+Deployment is Cloudflare Workers Static Assets (`wrangler.toml`); Cloudflare uploads `dashboard/` as built and does not run the pipeline:
 
 ```sh
 npx wrangler deploy
 ```
 
-Preview with Wrangler:
+## Repository layout
 
-```sh
-npx wrangler dev
-```
-
-The Worker configuration lives in `wrangler.toml`.
-
-## Data and Publishing Notes
-
-Before making the repository public, check these items:
-
-- Keep `data/` ignored unless you intentionally want to publish the source corpus and generated caches.
-- Review `dashboard/index.html` because it embeds generated analysis data.
-- Review local endpoint defaults and API-key placeholders in scripts before inviting external contributors.
-- Cite original source material rather than generated summaries when making research claims.
-- Consider publishing a smaller reproducible sample dataset if the full corpus is too large for contributors.
-
-
-## Data Processing Pipeline
-
-This section documents the end-to-end pipeline that transforms raw government media files into the structured JSON consumed by the dashboard. The pipeline is implemented in `tools/build_dashboard.py` and orchestrates text extraction, multimodal review, incident extraction, capability inference, embedding-based relationship detection, and final dashboard assembly.
-
-### 1. Overview
-
-```mermaid
-graph TD
-    Sources["data/sources/
-Raw media: PDFs, images, video, audio
-(war.gov download)"] --> Manifest["Source Manifest
-data/processed/source_manifest.json
-Filenames, titles, agencies, locations,
-DVIDS metadata, release dates"]
-    Manifest --> DocAnalysis["Document Analysis"]
-
-    subgraph DA [Document Analysis]
-        direction TB
-        Split["PDF Splitting
-Incident bundles, FBI sections,
-Air Force packets"]
-        TextEx["Text Extraction
-Native PDF text via PyMuPDF
-LLM OCR fallback"]
-        Media["Media Processing
-Video: ffprobe
-Audio: ffmpeg + ASR
-Images: Tesseract
-Caption fetch"]
-        Split & TextEx & Media --> Reviewer
-    end
-
-    Reviewer["LocalModelReviewer
-Qwen3.6-35B-A3B-UD-MLX-4bit
-via OpenAI-compatible API
-
-Document review
-Incident extraction
-Media item review
-Audio context review
-Corpus executive summary"]
-    Reviewer --> Post["Post-processing
-Trend field normalization
-Evidence classification
-Capability inference
-Related sources via embeddings"]
-    Post --> Assembly["Analysis Assembly
-Year/type/method counts
-Evidence/theme/agency counts
-Keyword counts and hotspots
-Trend field definitions and counts
-Capability matrix
-Research signals
-Executive summary
-Flattened incident documents
-Source documents with related_sources"]
-    Assembly --> Output["Output
-data/processed/ufo_dashboard_analysis.json
-dashboard/index.html
-data/processed/documents/*.json
-data/processed/page_text/*.json
-data/reviewed/document_reviews.json
-data/processed/source_embeddings.json"]
-```
-
-### 2. Source Ingestion
-
-The pipeline begins with media downloaded from the U.S. Department of War's [PURSUE UFO release page](https://www.war.gov/ufo/). `tools/download_ufo_reports.py`:
-
-1. Fetches the CSV manifest from `war.gov/Portals/1/Interactive/2026/UFO/uap-data.csv`.
-2. Parses media records by type: PDF, image, video, and audio.
-3. For video/audio assets, queries the DVIDS Hub API to resolve the best MP4 file, thumbnail, closed captions, and duration metadata.
-4. Downloads each media file to `data/sources/` with sanitized filenames.
-5. Writes `data/processed/source_manifest.json`, keyed by filename, with title, media type, original source URL, agency, incident date, location, release date, DVIDS metadata, and narrative fields.
-
-The manifest is the metadata backbone for every downstream document.
-
-### 3. PDF Splitting and Segmentation
-
-Large archival PDFs are split into analytically meaningful segments before analysis. Three bundle types are recognized:
-
-| Bundle Type | Pattern | Splitting Strategy |
-|---|---|---|
-| Incident bundles | `38_143685_box7_Incident_Summaries_1-100` | Detects incident summary sheet markers and incident numbers; each incident becomes a child document. |
-| FBI sections | `65_HS1-834228961_62-HQ-83894_Section_NNN` | Score-based segmentation using memorandum headers, subject lines, dates, and FBI patterns. |
-| Air Force packets | `342_HS1-416511228_319.1_Flying_Discs_1949` | Uses the same score-based segmentation approach as FBI sections. |
-
-The package-start score considers government/memorandum headers, subject lines, salutations, date patterns, and declassification/search-slip markers. Very short segments are discarded.
-
-### 4. Text Extraction
-
-Each PDF goes through a multi-stage text extraction pipeline:
-
-```mermaid
-graph TD
-    Native["PyMuPDF native extraction
-Extract text via fitz.Page.get_text('text')
-Count cleaned alphanumeric characters"]
-    Native --> Check{"native_chars < 120?
-(default --min-native-chars)"}
-    Check -->|no| Output["ExtractedPage objects
-{ page_number, text, method,
-native_chars, ocr_chars, text_chars }"]
-    Check -->|yes| LlmOcr["LLM OCR
-Render page at 2.0x scale
-JPEG quality 88
-Downsample to 1800px max dimension
-Send image to local model
-Fallbacks: compact form OCR,
-standard OCR, Tesseract,
-Tesseract plus LLM refine"]
-    LlmOcr --> Output
-```
-
-The extraction method is recorded per document:
-
-- `native`: all pages had sufficient native text.
-- `ocr`: OCR was used.
-- `hybrid`: native text and OCR were both used.
-
-Text extraction results are cached in `data/processed/page_text/<filename>.json` with versioning. Cache invalidation checks file size, modification time, and analysis options.
-
-### 5. Document Review
-
-`LocalModelReviewer` connects to the local OpenAI-compatible endpoint and performs several review tasks:
-
-- Document review: samples pages, text excerpts, and selected rendered page images, then asks for structured JSON.
-- Incident extraction: chunks OCR text from split incident bundles and extracts incident-level records.
-- Media review: extracts image text, video metadata/frames, audio transcripts, and contextual media summaries.
-- Audio context review: fills missing audio characterization and transcript summary fields.
-- Corpus executive summary: synthesizes a high-level summary from the reviewed corpus.
-
-Structured review fields include `summary_narrative`, `visual_observations`, `document_type`, `themes`, `agencies`, `location_label`, `evidence_category`, and 40+ normalized trend fields.
-
-### 6. Trend Field Normalization
-
-Reviewed documents are normalized against `TREND_FIELD_DEFINITIONS`. Field types include:
-
-- `integer_or_null`
-- `boolean`
-- `string_or_null`
-- `enum`
-- `enum_list`
-
-Normalization maps variants to allowed enum values, filters unknown values, caps long enum lists, clamps integer fields, and normalizes whitespace. Trend fields cover record type, observation mode, sensor platform, observer role, corroboration type, chain of custody, redaction level, time/location precision, environmental context, morphology, luminosity, motion, mundane explanation, resolution status, media authenticity, measurement quality, and quantitative evidence.
-
-### 7. Evidence Classification
-
-Evidence classification operates at two levels:
-
-- Manual/generated overrides in `data/reviewed/document_reviews.json`.
-- Automated inference when no override exists.
-
-The inference rubric considers event keywords, detail keywords, witness language, hard-evidence terms, support terms, document type, imagery/sensor themes, location/date availability, review status, agency attribution, and multi-witness phrasing.
-
-Categories:
-
-| Category | Meaning |
+| Path | Purpose |
 |---|---|
-| Category One | Detailed event reports with eyewitness depth and at least one hard-evidence signal. |
-| Category Two | Event records with some supporting evidence, but not enough for Category One. |
-| Category Three | Records with limited evidence, weak corroboration, or sparse eyewitness support. |
+| `ufo_pipeline/` | The pipeline package: `download`, `extract`, `analyze`, `embed`, `site`, plus `llm` (client, retries, fallback chains), `geo` (place resolution), `config`, `cli`. |
+| `dashboard/index.html`, `dashboard/assets/` | Hand-written front end (no build step). `app.js` is the overview and explorers, `report.js` the deep-report view. |
+| `dashboard/data/` | Generated site data (index, reports, search shards, frame thumbnails). |
+| `data/sources/` | Downloaded source media. Ignored by Git. |
+| `data/processed/source_manifest.json` | Source manifest with checksums. |
+| `data/cache/` | Stage caches (`pages/`, `media/`, `analysis/`, embeddings, corpus summary) and `run_issues.json`, the report of the last run. |
+| `tools/update_dashboard.sh` | One-command refresh. |
 
-### 8. Capability Inference
+## What the reports contain
 
-Ten capability categories are inferred from title, summaries, visual observations, transcript summaries, themes, agencies, and top terms:
+The report design follows what UAP researchers, archivists and FOIA practitioners ask of a record:
 
-| Capability | Group | Example Keywords |
-|---|---|---|
-| Instant Acceleration | Maneuver | instant acceleration, rapid acceleration, sudden acceleration, supersonic, high speed |
-| Abrupt Vector Change | Maneuver | abrupt turn, sharp turn, erratic movement, corkscrew, zigzag |
-| Stationary Hover | Maneuver | hover, hovering, stationary, motionless, loiter |
-| Formation Behavior | Coordination | formation, multiple objects, swarm, cluster, dual UAP |
-| Transmedium/USO | Environment | USO, transmedium, in and out of water, submerged, underwater |
-| Obscuration Traversal | Environment | cloud, clouds, obscured, haze |
-| Thermal/Luminous Signature | Signature | infrared, IR hot, thermal, bright object, glow, pulsing |
-| Sensor Tracked | Evidence | radar, sensor, tracked, FLIR, electro-optical, LiDAR |
-| Physical Trace | Evidence | physical trace, indentation, burned vegetation, debris |
-| Low Observable | Signature | low observable, low contrast, diffuse, faint, silent, intermittent |
+- **Three kinds of date kept apart** – incident date, document date and release date.
+- **Incident facts** modelled on the Air Force's own reporting format (AFR 200-2): time and duration, observer location, witnesses and their role, manner of observation and sensors, object description, weather, official action.
+- **The record's conclusion vs. the analyst assessment**, always shown separately. Candidate conventional explanations carry supporting and contradicting evidence and an intelligence-community likelihood band.
+- **Standard scales** – Hynek class, Vallée class and SVP rating, NATO Admiralty source-reliability and information-credibility codes (rated separately).
+- **Documentation strength** – a transparent, computed 0–100 score for how well an incident is documented (sensing, witnesses, specificity, documentation). It is not a measure of how anomalous the event is.
+- **Provenance** – originating office, file numbers, classification markings as printed, declassification, redaction level and exemption codes, items referenced but missing.
+- **Verification** – every quote is labelled as an exact match, close match or not found in the page text; every page shows how its text was obtained.
 
-Each capability definition is checked against the combined document text, and the highest-scoring matches are attached to the record.
+"Unexplained in the record" means the file offers no resolution. It does not mean the event is anomalous.
 
-### 9. Embedding-Based Related Sources
+## Data and publishing notes
 
-Related-source detection uses cosine similarity between document embeddings:
-
-1. Build embedding text from title, summary, visual observations, transcript summary, child incident summaries, metadata, themes, agencies, capabilities, and trend fields.
-2. Request embeddings in batches from the OpenAI-compatible embedding endpoint.
-3. L2-normalize all vectors.
-4. Rank candidates above `--related-sources-min-score` using cosine similarity.
-5. Compute shared factors such as same/adjacent year, location, themes, agencies, capabilities, observer roles, corroboration types, morphology, color/luminosity, motion class, and quantitative fields.
-6. Attach up to `--related-sources-limit` related sources per document.
-
-Results are cached in `data/processed/source_embeddings.json` with model name and content signatures for incremental updates.
-
-### 10. Dashboard Assembly
-
-`build_analysis` assembles the final JSON:
-
-```python
-{
-    "generated_at": "...",
-    "document_count": 221,
-    "source_document_count": 221,
-    "incident_count": 534,
-    "analysis_item_count": 534,
-    "physical_source_count": 221,
-    "total_pages": 4281,
-    "total_physical_source_pages": 4281,
-    "media_counts": [
-        {"label": "audio", "count": 8},
-        {"label": "image", "count": 14},
-        {"label": "pdf", "count": 122},
-        {"label": "video", "count": 77}
-    ],
-    "year_counts": [],
-    "document_type_counts": [],
-    "extraction_method_counts": [],
-    "evidence_category_counts": [],
-    "theme_counts": [],
-    "agency_counts": [],
-    "keyword_counts": [],
-    "hotspots": [],
-    "trend_field_definitions": {},
-    "trend_field_counts": {},
-    "capability_definitions": [],
-    "capability_matrix": [],
-    "research_signals": [],
-    "related_source_stats": {},
-    "executive_summary": {},
-    "incidents": [],
-    "documents": []
-}
-```
-
-The dashboard template embeds this JSON as a `<script type="application/json" id="dashboard-data">` block and renders all interactive components client-side.
-
-### 11. Data Flow Summary
-
-```mermaid
-graph TD
-    Sources["Source files
-(PDF/image/video/audio)"] --> Manifest["Source manifest
-(metadata extraction from war.gov CSV + DVIDS API)"]
-    Sources --> Split["PDF splitting
-(incident bundles, FBI sections, Air Force packets)"]
-    Sources --> Extract["Text extraction
-(native PyMuPDF -> LLM OCR fallback -> Tesseract fallback)"]
-    Sources --> Media["Media processing
-(ffprobe -> ffmpeg -> ASR -> caption fetch)"]
-    Manifest --> Review["AI review
-(document review, incident extraction, media review,
-audio context, corpus executive summary)"]
-    Split --> Review
-    Extract --> Review
-    Media --> Review
-    Review --> Post["Post-processing
-(trend normalization, evidence classification,
-capability inference, related sources via embeddings)"]
-    Post --> Assemble["Analysis assembly
-(aggregation, sanitization, JSON output)"]
-```
-
-### 12. Caching Strategy
-
-Every stage of the pipeline is cache-aware:
-
-| Cache | Path | Invalidation Key |
-|---|---|---|
-| Page text | `data/processed/page_text/*.json` | File size, mtime, page limit, native text threshold, OCR Markdown directory. |
-| Document analysis | `data/processed/documents/*.json` | File size, mtime, analysis options, applied review match. |
-| Transcripts | `data/processed/transcripts/*.txt` | Reused when present; ASR skip metadata is stored in adjacent JSON. |
-| Reviews | `data/reviewed/document_reviews.json` | Manual/generated review file; refreshed with `--refresh-reviews`. |
-| Embeddings | `data/processed/source_embeddings.json` | Model name and SHA-256 content signature. |
-| OCR Markdown | `data/ocr_markdown/*.md` | File existence unless `--refresh-ocr-markdown` is used. |
-| Executive summary | Embedded in review file | Corpus signature built from document summaries. |
-
-Cache version constants are embedded in the generated cache files so incompatible records can be rebuilt safely.
+- `data/` is ignored by Git; the full source corpus is tens of gigabytes.
+- `dashboard/data/` contains the generated analysis and extracted page text. Review it before publishing.
+- Directories from the previous pipeline (`data/ocr_markdown/`, `data/processed/documents/`, `data/processed/page_text/`, `data/processed/transcripts/`, `data/reviewed/`) are no longer read and can be deleted.
 
 ## License
 
-This project is released under the MIT License. See [LICENSE](LICENSE).
+See [LICENSE](LICENSE).
