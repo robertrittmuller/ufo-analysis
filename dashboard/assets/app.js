@@ -255,11 +255,30 @@ function viewOverview(main) {
   <section class="panel"><h2>Incidents over time</h2><p class="sub">Each column is the number of extracted incidents dated to that year, split by the status the record itself gives. Select a column to list them.</p>${timeline(incidents)}</section>
   <section class="panel"><h2>Where incidents were reported</h2><p class="sub">Select a dot to open the incident. Position precision varies — see the note under the map.</p><div id="map"></div></section>
 
-  ${sum.findings && sum.findings.length ? `<section class="panel"><h2>Cross-cutting findings</h2><p class="sub">Each finding links to the reports that support it.</p>
-     ${sum.findings.map((f) => `<div class="finding"><h3>${esc(f.title)}</h3><p>${esc(f.text)}</p><div class="small">${f.report_ids.map(title).filter(Boolean).join(" · ")}</div></div>`).join("")}</section>` : ""}
+  ${sum.findings && sum.findings.length ? `<section class="panel findings-panel"><div class="findings-head"><div><div class="eyebrow">Patterns across the corpus</div><h2>Cross-cutting findings</h2></div><p class="sub">${sum.findings.length} findings that hold across files, eras and agencies. Each lists the reports that support it.</p></div>
+     <ol class="findings">${sum.findings.map((f, i) => {
+       const links = f.report_ids.map(title).filter(Boolean);
+       return `<li class="finding"><div class="fnum" aria-hidden="true">${String(i + 1).padStart(2, "0")}</div><h3>${esc(f.title)}</h3><p>${esc(f.text)}</p>${links.length ? `<details class="fsrc"><summary><span class="fcount">${links.length}</span> supporting report${links.length === 1 ? "" : "s"}</summary><ul>${links.map((l) => `<li>${l}</li>`).join("")}</ul></details>` : ""}</li>`;
+     }).join("")}</ol></section>` : ""}
 
 
-  ${sum.notable && sum.notable.length ? `<section class="panel"><h2>Start here</h2><p class="sub">Files flagged as most worth reading first.</p><ul class="tight">${sum.notable.map((n) => `<li>${title(n.id)} — <span class="muted">${esc(n.why)}</span></li>`).join("")}</ul></section>` : ""}
+  ${sum.notable && sum.notable.length ? (() => {
+    const picks = sum.notable.map((n) => ({ n, r: App.reportById.get(n.id) })).filter((x) => x.r);
+    const yr = (r) => +(String(r.doc_date || "").slice(0, 4)) || r.year || null;
+    const years = picks.map((x) => yr(x.r)).filter(Boolean);
+    const span = years.length ? `${Math.min(...years)}–${Math.max(...years)}` : "";
+    const size = (r) => r.pages ? `${fmt(r.pages)} pp` : r.duration ? `${Math.floor(r.duration / 60)}:${String(Math.round(r.duration % 60)).padStart(2, "0")} ${r.media === "audio" ? "audio" : "video"}` : label("media", r.media);
+    return `<section class="panel start-panel"><div class="start-head"><div><div class="eyebrow">Reading list</div><h2>Start here</h2><p class="sub">Files flagged as most worth reading first, and why.</p></div>
+      <div class="start-stats"><span><b>${picks.length}</b> files</span>${span ? `<span><b>${span}</b> span</span>` : ""}<span><b>${new Set(picks.map((x) => x.r.agency)).size}</b> agencies</span></div></div>
+      <ol class="dossiers">${picks.map(({ n, r }, i) => `<li class="dossier">
+        <div class="dtab"><span>File ${String(i + 1).padStart(2, "0")}</span>${yr(r) ? `<b>${yr(r)}</b>` : ""}</div>
+        <div class="dbody">
+          <h3><a href="#/report/${encodeURIComponent(r.id)}">${esc(r.title)}</a></h3>
+          <p class="dwhy">${esc(n.why)}</p>
+          <div class="dmeta"><span>${esc(r.agency)}</span><span>${esc(cap(r.kind || ""))}</span><span>${size(r)}</span>${r.incidents ? `<span>${r.incidents} incident${r.incidents === 1 ? "" : "s"}</span>` : ""}</div>
+          <div class="dfoot">${badge("disposition", r.disposition)}<span class="dgo" aria-hidden="true">Open report →</span></div>
+        </div></li>`).join("")}</ol></section>`;
+  })() : ""}
   ${sum.caveats && sum.caveats.length ? `<section class="panel"><h2>Limits of this analysis</h2><ul class="tight">${sum.caveats.map((c) => `<li>${esc(c)}</li>`).join("")}</ul></section>` : ""}
 
   <section class="panel"><h2>Data quality</h2><p class="sub">How the text was obtained and how far the machine output could be checked.</p>
