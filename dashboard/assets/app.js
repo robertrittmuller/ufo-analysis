@@ -295,6 +295,8 @@ function viewOverview(main) {
     ${q.issues.length ? `<details class="more"><summary>${q.issues.length} report${q.issues.length === 1 ? "" : "s"} with known gaps</summary><ul class="tight">${q.issues.map((i) => `<li><a href="#/report/${encodeURIComponent(i.id)}">${esc(i.title)}</a> — <span class="muted">${esc(i.problems.join("; "))}</span></li>`).join("")}</ul></details>` : ""}
   </section>`;
   drawMap($("#map", main), incidents);
+  const narr = $(".overview-split .narrative", main);
+  if (narr && "ResizeObserver" in window) new ResizeObserver(() => narr.style.setProperty("--narr-h", narr.offsetHeight + "px")).observe(narr);
   bindTips(main); bindChartLinks(main);
 }
 
