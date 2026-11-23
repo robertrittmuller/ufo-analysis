@@ -1,8 +1,10 @@
 data/
 dashboard/data/
+dashboard/files/
 .venv
 .DS_Store
 __pycache__/
 .env
 .env.*
 !.env.example
+.claude/

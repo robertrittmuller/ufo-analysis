@@ -79,7 +79,7 @@
         <div class="chips">${badge("disposition", A.disposition)}${S.record_kind ? `<span class="chip">${esc(cap(S.record_kind))}</span>` : ""}${(S.themes || []).map((t) => `<a class="chip" href="#/reports?theme=${encodeURIComponent(t)}">${esc(t)}</a>`).join("")}</div>
         <div class="actions">${M.original_source_url ? `<a class="btn primary" href="${esc(M.original_source_url)}" target="_blank" rel="noopener">Open original file ↗</a>` : ""}
           ${M.dvids_video_url ? `<a class="btn" href="${esc(M.dvids_video_url)}" target="_blank" rel="noopener">Publisher video page ↗</a>` : ""}
-          <button class="btn" id="cite">Copy citation</button><button class="btn" id="dl">Download report JSON</button><button class="btn" id="print">Print</button></div></header>
+          <a class="btn" href="/files/${encodeURIComponent(R.id)}/">Shareable page</a><button class="btn" id="cite">Copy citation</button><button class="btn" id="dl">Download report JSON</button><button class="btn" id="print">Print</button></div></header>
       ${problems.length ? `<div class="warnbox"><b>This report has known gaps.</b><ul class="tight">${problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div>` : ""}
 
       <section class="sec" id="sec-summary"><h2>Summary</h2>
@@ -211,7 +211,7 @@
 
   window.viewReport = async function (main, id, params) {
     if (!id || !App.reportById.has(id)) { main.innerHTML = `<p class="empty">That report does not exist. <a href="#/reports">Browse all reports</a>.</p>`; return; }
-    document.title = `${App.reportById.get(id).title} — UAP Files Research Dashboard`;
+    document.title = `${App.reportById.get(id).title} | Declassified UFO Files`;
     if (!cache.has(id)) {
       main.innerHTML = `<p class="loading">Loading report…</p>`;
       try { const res = await fetch(`data/reports/${encodeURIComponent(id)}.json`); if (!res.ok) throw new Error(`HTTP ${res.status}`); cache.set(id, await res.json()); }

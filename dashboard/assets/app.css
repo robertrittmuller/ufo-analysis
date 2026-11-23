@@ -188,3 +188,12 @@ details.more > summary { cursor: pointer; color: var(--teal); font-size: 13.5px;
   .overview-split .narrative { position: static; max-height: none; overflow: visible; }
 }
 @media print { .overview-split { grid-template-columns: 1fr; } .overview-split .narrative { position: static; max-height: none; overflow: visible; } }
+
+/* static, crawlable report pages (/files/) */
+.static-page h1 { margin-bottom: 6px; }
+.static-page article > .panel { margin-bottom: 18px; }
+.crumbs { color: var(--muted); margin-bottom: 12px; }
+.static-page blockquote { margin: 0 0 14px; padding: 4px 0 4px 14px; border-left: 3px solid var(--gold); }
+.static-page blockquote p { margin-bottom: 4px; }
+.static-page .kv { margin-top: 14px; }
+.file-list li { margin-bottom: 6px; }

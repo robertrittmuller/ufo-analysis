@@ -1,6 +1,8 @@
-/* UAP Files Research Dashboard — overview, explorers, entities, full-text search.
+/* Declassified UFO Files — overview, explorers, entities, full-text search.
    Data: data/index.json (compact corpus index) + data/reports/<id>.json loaded on demand (report.js). */
 "use strict";
+const SITE_NAME = "Declassified UFO Files";
+const SITE_TITLE = "Declassified UFO Files: Search Every Government UAP Report";
 
 const App = { index: null, reportById: new Map(), incidentsByReport: new Map(), land: null, shards: null };
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -77,7 +79,7 @@ function route() {
   const views = { overview: viewOverview, reports: viewReports, incidents: viewIncidents, entities: viewEntities, search: viewSearch, about: viewAbout };
   if (view === "report") return window.viewReport(main, parts[1], params);
   (views[view] || viewOverview)(main, params);
-  document.title = `${cap(view)} — UAP Files Research Dashboard`;
+  document.title = view === "overview" ? SITE_TITLE : `${cap(view)} | ${SITE_NAME}`;
   if (!params.toString()) window.scrollTo(0, 0);
 }
 
@@ -211,7 +213,7 @@ function viewOverview(main) {
   main.innerHTML = `
   <section class="hero">
     <div class="eyebrow">U.S. Department of War · PURSUE releases</div>
-    <h1>The UAP files, read page by page</h1>
+    <h1>THE DECLASSIFIED UFO FILES</h1>
     <p class="lead">Every released document, image, video and audio recording has been transcribed, analysed and cross-referenced. Start with the overview below, then open any file's deep report for page-cited incidents, provenance, official handling and an explanation assessment.</p>
     <div class="tiles">
       <div class="tile"><b>${fmt(s.reports)}</b><span>source files analysed</span></div>

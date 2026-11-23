@@ -1,4 +1,4 @@
-# UAP Files Research Dashboard
+# Declassified UFO Files
 
 An interactive research dashboard for the U.S. Department of War [PURSUE](https://www.war.gov/ufo/) UAP/UFO file releases. The pipeline downloads every released document, image, video and audio file, transcribes it, writes a page-cited deep analysis report for each file, and publishes a static site:
 

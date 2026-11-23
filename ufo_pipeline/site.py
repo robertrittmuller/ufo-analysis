@@ -2,13 +2,14 @@
 
 Writes dashboard/data/index.json (compact overview of every report and incident),
 dashboard/data/reports/<id>.json (the full deep report with page text, loaded on demand),
-full-text search shards, video frame thumbnails, sitemap and robots.
+full-text search shards, video frame thumbnails, static per-report pages (pages.py), sitemap and robots.
 The HTML/JS/CSS in dashboard/ are hand-written source files and are not generated.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import io
 import re
 import shutil
@@ -22,6 +23,7 @@ from .config import REPO_ROOT, Settings
 from .download import find_orphans, load_manifest
 from .embed import load_reports
 from .geo import Gazetteer
+from .pages import write_pages
 from .util import atomic_write_bytes, atomic_write_json, atomic_write_text, clean_str, log, now_iso, read_json, stable_hash
 
 SITE_DATA_VERSION = 1
@@ -335,6 +337,41 @@ def _corpus_summary(reports: List[Dict[str, Any]], stats: Dict[str, Any], settin
     return summary
 
 
+def seo_description(stats: Dict[str, Any]) -> str:
+    """Search-result description for the home page, with counts from the current build."""
+    pages = int(stats.get("pages") or 0)
+    pages_text = f"{pages // 1000 * 1000:,}+" if pages >= 1000 else f"{pages:,}"
+    return (f"Search {stats.get('reports', 0):,} declassified U.S. government UFO/UAP files: {pages_text} pages, "
+            "videos and audio from the Department of War PURSUE release, transcribed and analysed.")
+
+
+def _update_page_meta(page: Path, description: str, base: str) -> None:
+    """Refresh the description and canonical/social URLs in the hand-written index.html."""
+    if not page.exists():
+        return
+    html = page.read_text(encoding="utf-8")
+    safe = description.replace("&", "&amp;").replace('"', "&quot;")
+    html = re.sub(r'(<meta (?:name="description"|property="og:description"|name="twitter:description") content=")[^"]*(")',
+                  lambda m: m.group(1) + safe + m.group(2), html)
+    html = re.sub(r'(<link rel="canonical" href="|<meta property="og:url" content=")[^"]*(")',
+                  lambda m: m.group(1) + base + "/" + m.group(2), html)
+    html = re.sub(r'(<meta (?:property="og:image"|name="twitter:image") content=")[^"]*?(/assets/[^"]+")',
+                  lambda m: m.group(1) + base + m.group(2), html)
+    html = stamp_asset_versions(html, page.parent)
+    atomic_write_text(page, html)
+
+
+def stamp_asset_versions(html: str, site: Path) -> str:
+    """Add ?v=<content hash> to local CSS/JS links so browsers fetch a changed file instead of a cached one."""
+    def stamp(m: "re.Match[str]") -> str:
+        target = site / m.group(2).lstrip("/")
+        if not target.exists():
+            return m.group(0)
+        version = hashlib.sha256(target.read_bytes()).hexdigest()[:10]
+        return f'{m.group(1)}{m.group(2)}?v={version}"'
+    return re.sub(r'((?:href|src)=")(/?assets/[\w.-]+\.(?:css|js))(?:\?v=[^"]*)?"', stamp, html)
+
+
 def run(settings: Settings, corpus_summary: bool = True, partial: bool = False) -> Dict[str, Any]:
     site = settings.site_dir
     data_dir = site / "data"
@@ -532,9 +569,13 @@ def run(settings: Settings, corpus_summary: bool = True, partial: bool = False) 
         (site / "assets").mkdir(parents=True, exist_ok=True)
         shutil.copyfile(land, site / "assets" / "land.geojson")
     base = settings.site_url.rstrip("/")
+    _update_page_meta(site / "index.html", seo_description(stats), base)
     atomic_write_text(site / "robots.txt", f"User-agent: *\nAllow: /\n\nSitemap: {base}/sitemap.xml\n")
+    page_urls = write_pages(site, base, prune=not partial)
+    today = _dt.date.today().isoformat()
+    urls = "".join(f"  <url><loc>{url}</loc><lastmod>{today}</lastmod></url>\n" for url in [f"{base}/"] + page_urls)
     atomic_write_text(site / "sitemap.xml", '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-                      f"  <url><loc>{base}/</loc><lastmod>{_dt.date.today().isoformat()}</lastmod></url>\n</urlset>\n")
+                      f"{urls}</urlset>\n")
     result = {"reports": len(index_reports), "incidents": len(index_incidents), "pending": len(pending),
               "issues": len(issues), "shards": len(shard_files), "corpus_summary": bool(summary)}
     log(f"Build finished: {result}")
