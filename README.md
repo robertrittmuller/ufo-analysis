@@ -53,26 +53,22 @@ Every report also has a plain, crawlable HTML page at `/files/<id>/` that links 
 The pipeline is a Python package (`ufo_pipeline`) with five resumable stages. Each stage reads the previous stage's cache under `data/` and writes its own; only `build` writes into the published site folder.
 
 ```mermaid
-flowchart LR
-    src[("war.gov PURSUE<br/>CSV manifest<br/>+ DVIDS media")]
+flowchart TD
+    src(["war.gov PURSUE<br/>CSV manifest + DVIDS media"])
+    dl["<b>1 · download</b><br/>fetch, validate, checksum"]
+    ex["<b>2 · extract</b><br/>OCR, frame review,<br/>audio transcription"]
+    an["<b>3 · analyze</b><br/>deep report per file"]
+    em["<b>4 · embed</b><br/>related reports,<br/>same-event links"]
+    bd["<b>5 · build</b><br/>consistency rules,<br/>site data, pages"]
+    cf(["Cloudflare Workers<br/>Static Assets"])
 
-    subgraph pipeline["python -m ufo_pipeline all"]
-        direction LR
-        dl["<b>download</b><br/>fetch, validate,<br/>checksum"]
-        ex["<b>extract</b><br/>OCR, frame review,<br/>audio transcription"]
-        an["<b>analyze</b><br/>deep report<br/>per file"]
-        em["<b>embed</b><br/>related reports,<br/>same-event links"]
-        bd["<b>build</b><br/>consistency rules,<br/>site data, pages"]
-        dl --> ex --> an --> em --> bd
-    end
+    src --> dl --> ex --> an --> em --> bd --> site --> cf
 
-    src --> dl
     dl -.-> c1[("data/sources/<br/>source_manifest.json")]
     ex -.-> c2[("data/cache/pages/<br/>data/cache/media/")]
     an -.-> c3[("data/cache/analysis/")]
     em -.-> c4[("embeddings.json<br/>relations.json")]
-    bd --> site[("dashboard/data/<br/>dashboard/files/<br/>sitemap.xml")]
-    site --> cf["Cloudflare Workers<br/>Static Assets"]
+    site[("dashboard/data/<br/>dashboard/files/<br/>sitemap.xml")]
 ```
 
 | Stage | What it does | Models |
@@ -106,25 +102,31 @@ flowchart TD
 
 ### Extract: from media to text
 
+Documents and images become one text unit per page:
+
 ```mermaid
-flowchart LR
-    file[/"Source file"/] --> kind{Media type}
-
-    kind -- PDF --> pg{"Born-digital page?<br/>real text, little imagery"}
+flowchart TD
+    pdf[/"PDF page"/] --> pg{"Born-digital?<br/>real text,<br/>little imagery"}
+    img[/"Image"/] --> ocr
     pg -- yes --> native["Native text"]
-    pg -- "no (scan)" --> ocr["Vision-model OCR<br/>text + handwriting,<br/>redactions, markings"]
-    kind -- Image --> ocr
+    pg -- "no (scan)" --> ocr["Vision-model OCR<br/>text, handwriting,<br/>redactions, markings"]
+    native --> pages[("data/cache/pages/")]
+    ocr --> pages
+```
 
-    kind -- Video --> probe["ffprobe"] --> frames["Sample frames<br/>across the clip"] --> fr["Vision model describes<br/>the frames together"]
-    probe --> aud
-    kind -- Audio --> aud["Split into<br/>60 s chunks"] --> asr["Speech recognition<br/>(silence and junk rejected)"]
-    kind -- "Video / audio" --> cap["Official captions<br/>where published"]
+Video and audio become a frame description, a timed transcript and any published captions:
 
-    native --> units[("Page / segment units<br/>data/cache/pages/<br/>data/cache/media/")]
-    ocr --> units
-    fr --> units
-    asr --> units
-    cap --> units
+```mermaid
+flowchart TD
+    media[/"Video or audio file"/] --> probe["ffprobe"]
+    probe -- "video track" --> frames["Sample frames<br/>across the clip"]
+    frames --> fr["Vision model<br/>describes the frames"]
+    probe -- "audio track" --> aud["Split into<br/>60 s chunks"]
+    aud --> asr["Speech recognition<br/>silence, junk rejected"]
+    media --> cap["Official captions<br/>where published"]
+    fr --> mc[("data/cache/media/")]
+    asr --> mc
+    cap --> mc
 ```
 
 ### Analyze: map over parts, reduce to a report
@@ -149,32 +151,30 @@ flowchart TD
 
 ### Embed and build: linking and publishing
 
+`embed` turns reports and incidents into vectors and stores two kinds of link:
+
 ```mermaid
 flowchart TD
-    reps[("Analysed reports")] --> emb["Embed reports and incidents<br/>(cached by content hash + model)"]
-    emb --> rel["Related reports<br/>top matches by similarity"]
-    emb --> same["Same-event candidates<br/>close text match, dates agree,<br/>places do not conflict"]
+    reps[("Analysed reports")] --> emb["Embed reports<br/>and incidents<br/>cached by content<br/>hash + model"]
+    emb --> rel["Related reports<br/>top matches<br/>by similarity"]
+    emb --> same["Same-event candidates<br/>close text match,<br/>dates agree, places<br/>do not conflict"]
     rel --> relj[("relations.json")]
     same --> relj
+```
 
-    relj --> build
-    reps --> build
+`build` applies the deterministic rules, groups accounts into events and writes the site:
 
-    subgraph build["build"]
-        direction TB
-        geo["Re-resolve places<br/>with the gazetteer"] --> cons["Consistency rules<br/>(consistency.py, no model)"]
-        cons --> groups["Group repeat accounts into events<br/>at most one account per file;<br/>best-documented account is primary"]
-        groups --> net["Connections graph<br/>time + place, description, same event,<br/>person and mission hubs, 3D layout"]
-        groups --> stats["Corpus statistics<br/>(counted over events, not accounts)"]
-        stats --> synth["Corpus synthesis (model)<br/>+ audit of every number it states"]
-    end
-
-    build --> idx[("data/index.json")]
-    build --> rj[("data/reports/&lt;id&gt;.json")]
-    build --> sh[("data/search/shard-*.json")]
-    build --> fr[("data/frames/")]
-    net --> cj[("data/connections.json")]
-    build --> pages[("files/&lt;id&gt;/index.html<br/>sitemap.xml, robots.txt")]
+```mermaid
+flowchart TD
+    in[("Analysed reports<br/>+ relations.json")] --> geo["Re-resolve places<br/>with the gazetteer"]
+    geo --> cons["Consistency rules<br/>consistency.py, no model"]
+    cons --> groups["Group repeat accounts<br/>into events, at most one<br/>account per file"]
+    groups --> net["Connections graph<br/>factors, hubs,<br/>3D layout"]
+    groups --> stats["Corpus statistics<br/>counted over events"]
+    stats --> synth["Corpus synthesis<br/>model-written, every<br/>number audited"]
+    net --> data[("dashboard/data/<br/>index.json<br/>reports/&lt;id&gt;.json<br/>search/shard-*.json<br/>frames/, connections.json")]
+    synth --> data
+    data --> pages[("dashboard/files/&lt;id&gt;/<br/>sitemap.xml<br/>robots.txt")]
 ```
 
 Before anything is written to the site, model names are replaced with the type of model (vision-language, speech-recognition or text-embedding model), and quotes that could not be matched to page text are hidden.
