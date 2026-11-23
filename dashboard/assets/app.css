@@ -108,7 +108,11 @@ tr.click { cursor: pointer; }
 .map svg { display: block; width: 100%; height: auto; cursor: grab; touch-action: none; } .map svg.drag { cursor: grabbing; }
 .map .land { fill: #1b2330; stroke: #2c3647; stroke-width: .4; vector-effect: non-scaling-stroke; }
 .map .dot { fill: var(--s1); fill-opacity: .8; stroke: #0a0e15; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: pointer; }
-.map .dot.coarse { fill: transparent; stroke: var(--s1); stroke-width: 1.4; }
+.map .dot.estimated { fill: var(--s2); }
+.map .dot.coarse { fill: transparent; stroke: var(--neutral); stroke-width: 1.4; }
+.maplegend { margin-bottom: 10px; } .maplegend i { border-radius: 50%; }
+.maplegend i.confirmed { background: var(--s1); } .maplegend i.estimated { background: var(--s2); } .maplegend i.coarse { background: transparent; border: 1.5px solid var(--neutral); }
+.chip.small { font-size: 11px; padding: 0 6px; vertical-align: 1px; }
 .map .dot:hover { fill: var(--gold); fill-opacity: 1; }
 .mapctl { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 4px; }
 .meter { display: inline-flex; gap: 2px; vertical-align: middle; } .meter i { width: 9px; height: 9px; border-radius: 2px; background: var(--surface-3); } .meter i.on { background: var(--s1); }

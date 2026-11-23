@@ -95,12 +95,12 @@ Read ALL of it and return ONE JSON object. To keep the answer compact: write min
      "measurements_from": "witness-estimate|instrument|both|none",
      "official_action": "interception, investigation, reporting chain",
      "official_explanation": "what the record itself concludes, or \\"\\"",
-     "status_in_record": "{statuses}",
+     "status_in_record": "{statuses}",  // what the RECORD concludes: use unidentified only when the record itself states that an evaluation left it unidentified or unresolved; use not-evaluated when the record only reports the sighting and gives no evaluation
      "assessment": {{
-        "hynek": "{hynek}",
+        "hynek": "{hynek}",  // NL = distant light at night, DD = distant object in daylight, RV = radar with visual confirmation, CE1-3 = within about 150 m
         "best_explanation": "most plausible conventional explanation on this evidence, or \\"none identified\\"",
         "explanation_category": "{explanations}",
-        "likelihood": "{likelihoods}",
+        "likelihood": "{likelihoods}",  // likelihood that best_explanation is correct; omit when none is identified
         "reasoning": "1-3 sentences: evidence for and against, and what is missing",
         "strangeness": 1  // 1 (ordinary) to 5 (hard to reconcile with known phenomena AS REPORTED)
      }},
@@ -593,7 +593,7 @@ def _merge_incident(base: Dict[str, Any], extra: Dict[str, Any]) -> None:
     if base["date"]["precision"] == "none" or (len(extra["date"]["iso"]) > len(base["date"]["iso"])):
         if extra["date"]["precision"] != "none":
             base["date"] = extra["date"]
-    order = {"city": 4, "estimated": 3, "region": 2, "country": 1, "none": 0}
+    order = {"city": 4, "stated": 4, "estimated": 3, "region": 2, "country": 1, "none": 0}
     if order[extra["location"]["precision"]] > order[base["location"]["precision"]]:
         base["location"] = extra["location"]
     if base["status_in_record"] == "not-evaluated":
@@ -618,7 +618,7 @@ def documentation_score(incident: Dict[str, Any]) -> Dict[str, Any]:
     witness += 5 if any(w["firsthand"] for w in incident["witnesses"]) else 0
     spec = {"day": 6, "month": 3, "year": 1, "none": 0}[incident["date"]["precision"]]
     spec += 4 if incident["time_text"] else 0
-    spec += {"city": 6, "estimated": 5, "region": 3, "country": 1, "none": 0}[incident["location"]["precision"]]
+    spec += {"city": 6, "stated": 6, "estimated": 5, "region": 3, "country": 1, "none": 0}[incident["location"]["precision"]]
     spec += 2 if incident["duration_text"] else 0
     described = sum(1 for k in ("shape_text", "size", "color", "altitude", "speed", "motion", "disappearance") if incident["object"].get(k))
     spec += min(7, described)

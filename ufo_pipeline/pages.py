@@ -24,7 +24,7 @@ _CSS_VERSION = [""]  # "?v=<hash of app.css>", set by write_pages so a changed s
 DISPOSITIONS = {
     "explained-in-record": "Explained in the record", "likely-explained": "Likely explained",
     "insufficient-information": "Insufficient information", "unexplained-in-record": "Unexplained in the record",
-    "not-a-sighting-record": "Not a sighting record",
+    "not-a-sighting-record": "Not a sighting record", "contains-incidents": "Contains incidents",
 }
 MEDIA = {"pdf": "Document", "image": "Image", "video": "Video", "audio": "Audio"}
 
@@ -108,7 +108,8 @@ def _report_page(report: Dict[str, Any], compact: Dict[str, Any], base: str) -> 
         ("Pages", compact.get("pages")),
         ("Length", f"{round(compact['duration'] / 60)} min" if compact.get("duration") else ""),
         ("What it is", synthesis.get("document_type") or compact.get("doc_type")),
-        ("Date of the record", (synthesis.get("document_date") or {}).get("text")),
+        # a corrected date (the record shows a camera placeholder) is given by its year, not the placeholder text
+        ("Date of the record", (synthesis.get("document_date") or {}).get("iso" if (synthesis.get("document_date") or {}).get("corrected") else "text")),
         ("Disposition", DISPOSITIONS.get(compact.get("disposition") or "", "")),
         ("Incidents extracted", compact.get("incidents")),
         ("Themes", ", ".join(compact.get("themes") or [])),

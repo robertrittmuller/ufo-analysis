@@ -30,8 +30,8 @@
       <div class="body">
         <p>${esc(inc.narrative)}</p>
         <div class="cols">
-          <div><p class="sub-h">When and where</p>${kv([["Date", esc(when) + (inc.date.text && inc.date.iso ? ` <span class="muted small">(as written: ${esc(inc.date.text)})</span>` : "")], ["Duration", esc(inc.duration_text)],
-            ["Place", loc.label ? `${esc(loc.label)} <span class="muted small">(${esc(loc.precision === "none" ? "not mapped" : loc.precision + "-level position")}; refers to the ${esc(loc.refers_to === "unclear" ? "observer or object — unclear" : loc.refers_to)})</span>` : ""],
+          <div><p class="sub-h">When and where</p>${kv([["Date", esc(when) + (inc.date.text && inc.date.iso ? ` <span class="muted small">(as written: ${esc(inc.date.text)})</span>` : "") + (inc.date.corrected ? ` <span class="muted small">— ${esc(inc.date.corrected)}</span>` : "")], ["Duration", esc(inc.duration_text)],
+            ["Place", loc.label ? `${esc(loc.label)} <span class="muted small">(${esc(loc.precision === "none" ? "not mapped" : ({ city: "confirmed position: named place", stated: "confirmed position: coordinates in the record", estimated: "estimated position, not confirmed", region: "state centroid only", country: "country centroid only" })[loc.precision] || loc.precision)}; refers to the ${esc(loc.refers_to === "unclear" ? "observer or object — unclear" : loc.refers_to)})</span>` : ""],
             ["Coordinates", loc.lat != null ? `${loc.lat}, ${loc.lon}` : ""], ["Light", inc.conditions.light !== "unknown" ? esc(cap(inc.conditions.light)) : ""], ["Weather", esc(inc.conditions.weather)]])}</div>
           <div><p class="sub-h">Observers and sensors</p>${kv([["Witnesses", inc.witnesses.length ? list(inc.witnesses.map((w) => `${w.description || cap(w.category)}${w.count > 1 ? ` (${w.count})` : ""} — ${cap(w.category)}, ${w.firsthand ? "first-hand" : "second-hand or unclear"}`)) : ""],
             ["Observed by", inc.observation.modes.length ? `<span class="chips">${inc.observation.modes.map((m) => `<span class="chip">${esc(cap(m))}</span>`).join("")}</span>` : ""], ["Sensors", esc(inc.observation.sensors)], ["Platform", esc(inc.observation.platform)],
@@ -44,7 +44,7 @@
         <div class="split">
           <div class="record"><p class="sub-h">What the record says</p>${kv([["Status", badge("status", inc.status_in_record)], ["Official action", esc(inc.official_action)], ["Official explanation", esc(inc.official_explanation) || `<span class="muted">None given in the record</span>`]])}</div>
           <div class="analyst"><p class="sub-h">Analyst assessment (machine-generated)</p>${kv([["Best explanation", esc(a.best_explanation) || `<span class="muted">None identified</span>`],
-            ["Likelihood", a.likelihood ? `${meter(LIKELIHOOD.indexOf(a.likelihood) + 1, 7)} ${esc(a.likelihood)}` : ""], ["Hynek class", a.hynek !== "not-applicable" ? esc(`${a.hynek} — ${label("hynek", a.hynek)}`) : ""],
+            ["Likelihood of this explanation", a.likelihood ? `${meter(LIKELIHOOD.indexOf(a.likelihood) + 1, 7)} ${esc(a.likelihood)}` : ""], ["Hynek class", a.hynek !== "not-applicable" ? esc(`${a.hynek} — ${label("hynek", a.hynek)}`) : ""],
             ["Strangeness", `${meter(a.strangeness, 5)} ${a.strangeness}/5`], ["Reasoning", esc(a.reasoning)]])}</div>
         </div>
         ${inc.quotes.length ? `<div><p class="sub-h">From the record</p>${inc.quotes.map((q) => quote(q, labels)).join("")}</div>` : ""}

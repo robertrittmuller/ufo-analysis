@@ -60,6 +60,37 @@ def valid_coords(lat: Any, lon: Any) -> Optional[Tuple[float, float]]:
     return round(lat_f, 3), round(lon_f, 3)
 
 
+_DEG = r"(\d{1,3}(?:\.\d+)?)\s*(?:°|º|deg(?:rees?)?\.?)\s*(?:(\d{1,2}(?:\.\d+)?)\s*(?:'|′|’|min(?:utes?)?\.?)?\s*)?(?:(\d{1,2}(?:\.\d+)?)\s*(?:\"|″|”|''|sec(?:onds?)?\.?)?\s*)?"
+_COORD_PATTERNS = [
+    # 62°00'N 33°00'W, 42° 9.3' N and 114° 22.2' W, 34 deg 15 min N, 118 deg 20 min W
+    re.compile(_DEG + r"(N|S|North|South)\b.{0,12}?" + _DEG + r"(E|W|East|West)\b", re.I | re.S),
+    # 363453N 0255943E, 3634N 02559E (degrees-minutes[-seconds], no separators)
+    re.compile(r"(?<!\d)(\d{2})(\d{2})(\d{2})?\s?(N|S)[\s,/-]{0,3}(\d{3})(\d{2})(\d{2})?\s?(E|W)\b"),
+    # 36.58N 25.99E
+    re.compile(r"(?<![\d.])(\d{1,2}\.\d+)()()\s?°?\s?(N|S)[\s,/-]{1,3}(\d{1,3}\.\d+)()()\s?°?\s?(E|W)\b"),
+]
+
+
+def find_coords(text: Any) -> List[Tuple[float, float]]:
+    """Coordinates printed in a text with an explicit hemisphere (N/S and E/W), as decimal (lat, lon) pairs."""
+    out: List[Tuple[float, float]] = []
+    for pattern in _COORD_PATTERNS:
+        for m in pattern.finditer(str(text or "")):
+            try:
+                lat = float(m.group(1)) + float(m.group(2) or 0) / 60 + float(m.group(3) or 0) / 3600
+                lon = float(m.group(5)) + float(m.group(6) or 0) / 60 + float(m.group(7) or 0) / 3600
+            except ValueError:
+                continue
+            if float(m.group(2) or 0) >= 60 or float(m.group(6) or 0) >= 60:
+                continue
+            lat = -lat if m.group(4)[0].upper() == "S" else lat
+            lon = -lon if m.group(8)[0].upper() == "W" else lon
+            point = valid_coords(lat, lon)
+            if point and point not in out:
+                out.append(point)
+    return out
+
+
 class Gazetteer:
     def __init__(self) -> None:
         import geonamescache

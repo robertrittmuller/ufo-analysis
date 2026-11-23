@@ -27,7 +27,7 @@ manifest    frames,     report     reports,   (dashboard/data)
 | `extract` | Every scanned PDF page and image is transcribed by a vision model, which also notes handwriting, redactions, markings and pictures. Born-digital pages use their native text. Video is sampled into frames that are described; audio is transcribed in full in 60-second chunks, plus official captions where available. | Remote → local → Tesseract → embedded text layer (OCR). Local → remote (audio). |
 | `analyze` | Reads the whole text in page-aligned parts (nothing is sampled), extracts constituent records, incidents, entities and key passages, then writes the file-level report. Quotes are checked against page text; dates and places are normalised. | Remote → local |
 | `embed` | Embeds reports and incidents to link related reports and the same event described in different files. | Local |
-| `build` | Writes `dashboard/data/` – a compact index, one JSON per report (loaded on demand), full-text search shards, frame thumbnails – and a corpus synthesis. | Remote → local |
+| `build` | Applies fixed consistency rules to the model's labels, groups repeat accounts of the same event, then writes `dashboard/data/` – a compact index, one JSON per report (loaded on demand), full-text search shards, frame thumbnails – and a corpus synthesis written from per-file summaries and corpus statistics. | Remote → local |
 
 Every stage is **resumable**. Results are cached by file content and settings, a failed page or part is never cached as if it had succeeded, and re-running a stage redoes only missing or failed work. Each result records which model or fallback produced it; the published dashboard shows only the type of model (vision-language, speech-recognition or text-embedding model), never the specific model name, per page and per report.
 
@@ -130,6 +130,10 @@ The report design follows what UAP researchers, archivists and FOIA practitioner
 - **Documentation strength** – a transparent, computed 0–100 score for how well an incident is documented (sensing, witnesses, specificity, documentation). It is not a measure of how anomalous the event is.
 - **Provenance** – originating office, file numbers, classification markings as printed, declassification, redaction level and exemption codes, items referenced but missing.
 - **Verification** – every quote is labelled as an exact match, close match or not found in the page text; every page shows how its text was obtained.
+- **Consistency rules** (`ufo_pipeline/consistency.py`, applied at build, no model involved) – an incident is "unidentified" only where the record states that conclusion or the publisher designates the case unresolved, otherwise "no evaluation in the record"; a Hynek class must agree with the recorded light and sensors; camera default timestamps (12/31/99) are not dates; a likelihood is shown only for a named explanation; a file that bundles incidents is labelled as containing incidents rather than given one disposition.
+- **Repeat accounts** – the same event reported in several files is listed once per file but counted once on the overview (close text match, agreeing dates, non-conflicting places, at most one account per file). The count of distinct incidents is an estimate.
+- **Map positions** – *confirmed* (named place found in the gazetteer, or coordinates printed in the record), *estimated* (the model's approximate coordinates, checked only against the stated state or country) or a state/country centroid; each is drawn differently.
+- **Corpus synthesis check** – the build logs every number in the model-written overview that is not a corpus statistic (`unverified_numbers` in `data/cache/corpus_summary.json`). Review those before deploying.
 
 "Unexplained in the record" means the file offers no resolution. It does not mean the event is anomalous.
 

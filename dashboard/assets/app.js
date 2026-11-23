@@ -14,16 +14,21 @@ const cap = (s) => String(s || "").replace(/-/g, " ").replace(/^./, (c) => c.toU
 const LABELS = {
   disposition: {
     "explained-in-record": "Explained in the record", "likely-explained": "Likely explained", "insufficient-information": "Insufficient information",
-    "unexplained-in-record": "Unexplained in the record", "not-a-sighting-record": "Not a sighting record",
+    "unexplained-in-record": "Unexplained in the record", "contains-incidents": "Contains incidents",
+    "not-a-sighting-record": "Not a sighting record",
   },
-  status: { identified: "Identified", "probably-identified": "Probably identified", unidentified: "Unidentified", "insufficient-information": "Insufficient information", "not-evaluated": "Not evaluated" },
+  status: { identified: "Identified", "probably-identified": "Probably identified", unidentified: "Unidentified", "insufficient-information": "Insufficient information", "not-evaluated": "No evaluation in the record" },
   hynek: { NL: "Nocturnal light", DD: "Daylight disc", RV: "Radar-visual", CE1: "Close encounter I", CE2: "Close encounter II", CE3: "Close encounter III", "not-applicable": "Not applicable" },
   media: { pdf: "Document", image: "Image", video: "Video", audio: "Audio" },
   band: { strong: "Strong", moderate: "Moderate", limited: "Limited", minimal: "Minimal" },
+  // how a map position was obtained: confirmed (named place found in the gazetteer, or coordinates printed in the record),
+  // estimated (the model's approximate coordinates for a place the gazetteer does not hold), or a centroid
+  precision: { city: "Named place", stated: "Coordinates in the record", estimated: "Estimated position", region: "State centroid", country: "Country centroid", none: "Not mapped" },
 };
+const POSITION = { city: "confirmed", stated: "confirmed", estimated: "estimated", region: "coarse", country: "coarse" };
 // Colour follows the category, never its rank (validated categorical order on the dark surface).
 const COLORS = {
-  disposition: { "explained-in-record": "var(--s3)", "likely-explained": "var(--s1)", "insufficient-information": "var(--s4)", "unexplained-in-record": "var(--s5)", "not-a-sighting-record": "var(--neutral)" },
+  disposition: { "explained-in-record": "var(--s3)", "likely-explained": "var(--s1)", "insufficient-information": "var(--s4)", "unexplained-in-record": "var(--s5)", "contains-incidents": "var(--s2)", "not-a-sighting-record": "var(--neutral)" },
   status: { identified: "var(--s3)", "probably-identified": "var(--s1)", "insufficient-information": "var(--s4)", unidentified: "var(--s5)", "not-evaluated": "var(--neutral)" },
 };
 const label = (kind, key) => (LABELS[kind] && LABELS[kind][key]) || cap(key) || "—";
@@ -79,7 +84,8 @@ function route() {
   const views = { overview: viewOverview, reports: viewReports, incidents: viewIncidents, connections: window.viewConnections, events: window.viewConnections, entities: viewEntities, search: viewSearch, about: viewAbout };
   if (view === "report") return window.viewReport(main, parts[1], params);
   (views[view] || viewOverview)(main, params);
-  document.title = view === "overview" ? SITE_TITLE : `${view === "events" ? "Connections" : cap(view)} | ${SITE_NAME}`;
+  const names = { events: "Connections", about: "Methods", entities: "People and organizations", search: "Full-text search" };
+  document.title = view === "overview" ? SITE_TITLE : `${names[view] || cap(view)} | ${SITE_NAME}`;
   if (!params.toString()) window.scrollTo(0, 0);
 }
 
@@ -139,7 +145,7 @@ function timeline(incidents) {
       marks += `<rect fill="${COLORS.status[s]}" x="${x}" y="${y1}" width="${bw}" height="${Math.max(1, y0 - y1 - (acc ? 1.5 : 0))}" rx="${acc + c[s] === total ? 2 : 0}"></rect>`;
       acc += c[s];
     });
-    out += `<g class="row" data-href="${before ? `#/incidents?to=${start - 1}` : `#/incidents?from=${y}&to=${y}`}" tabindex="0" role="link" aria-label="${before ? `Before ${start}` : y}: ${total} incidents" data-tip="${esc(`<b>${before ? `Before ${start}` : y}</b>${total} incident${total === 1 ? "" : "s"}<div class="muted">${lines}</div>`)}">
+    out += `<g class="row" data-href="${before ? `#/incidents?to=${start - 1}&unique=1` : `#/incidents?from=${y}&to=${y}&unique=1`}" tabindex="0" role="link" aria-label="${before ? `Before ${start}` : y}: ${total} incident${total === 1 ? "" : "s"}" data-tip="${esc(`<b>${before ? `Before ${start}` : y}</b>${total} incident${total === 1 ? "" : "s"}<div class="muted">${lines}</div>`)}">
       <rect class="hit" x="${padL + (y - lo) * slot}" y="${padT}" width="${slot}" height="${H - padB - padT}"></rect><g class="mark">${marks}</g></g>`;
   }
   out += `<line class="axisl" x1="${padL}" x2="${W}" y1="${H - padB}" y2="${H - padB}"></line>`;
@@ -161,6 +167,8 @@ function bindChartLinks(root) {
 }
 const countBy = (items, fn) => { const m = new Map(); items.forEach((it) => [].concat(fn(it) ?? []).forEach((k) => { if (k !== "" && k != null) m.set(k, (m.get(k) || 0) + 1); })); return m; };
 const topRows = (map, n, mk) => Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => mk(k, v));
+// A chart that shows only the largest categories says so.
+const topNote = (map, n) => (map.size > n ? ` The ${n} largest of ${map.size} categories are shown.` : "");
 
 /* ---------- map ---------- */
 async function drawMap(host, incidents) {
@@ -172,17 +180,24 @@ async function drawMap(host, incidents) {
   // group co-located points so a dot's size shows how many incidents share that spot
   const groups = new Map();
   pts.forEach((i) => { const k = `${i.lat.toFixed(1)},${i.lon.toFixed(1)}`; (groups.get(k) || groups.set(k, []).get(k)).push(i); });
+  // colour says how the position was obtained; a spot takes the best class among the incidents that share it
+  const klass = (g) => (g.some((x) => POSITION[x.place_precision] === "confirmed") ? "confirmed" : g.some((x) => POSITION[x.place_precision] === "estimated") ? "estimated" : "coarse");
+  const HOW = { confirmed: "confirmed position (named place or coordinates in the record)", estimated: "estimated position (approximate coordinates, not confirmed)", coarse: "approximate (state or country centroid)" };
   const dots = Array.from(groups.values()).sort((a, b) => b.length - a.length).map((g) => {
-    const i = g[0], coarse = g.every((x) => x.place_precision === "country" || x.place_precision === "region");
+    const i = g[0], cls = klass(g);
     const names = g.slice(0, 4).map((x) => esc(x.title)).join("<br>") + (g.length > 4 ? `<br>… and ${g.length - 4} more` : "");
-    const href = g.length === 1 ? `#/report/${encodeURIComponent(i.report)}?incident=${encodeURIComponent(i.id)}` : `#/incidents?near=${i.lat.toFixed(1)},${i.lon.toFixed(1)}`;
-    const tipHtml = `<b>${esc(i.place || "Unnamed place")}</b>${g.length} incident${g.length === 1 ? "" : "s"} · ${coarse ? "approximate (region/country centroid)" : "placed at " + esc(i.place_precision) + " level"}<div class="muted">${names}</div>`;
+    const href = g.length === 1 ? `#/report/${encodeURIComponent(i.report)}?incident=${encodeURIComponent(i.id)}` : `#/incidents?near=${i.lat.toFixed(1)},${i.lon.toFixed(1)}&unique=1`;
+    const tipHtml = `<b>${esc(i.place || "Unnamed place")}</b>${g.length} incident${g.length === 1 ? "" : "s"} · ${HOW[cls]}<div class="muted">${names}</div>`;
     const r = (2.4 + Math.sqrt(g.length) * 1.3).toFixed(1);
-    return `<circle class="dot${coarse ? " coarse" : ""}" cx="${px(i.lon).toFixed(1)}" cy="${py(i.lat).toFixed(1)}" r="${r}" data-r="${r}" data-href="${esc(href)}" tabindex="0" data-tip="${esc(tipHtml)}"></circle>`;
+    return `<circle class="dot ${cls}" cx="${px(i.lon).toFixed(1)}" cy="${py(i.lat).toFixed(1)}" r="${r}" data-r="${r}" data-href="${esc(href)}" tabindex="0" data-tip="${esc(tipHtml)}"></circle>`;
   }).join("");
-  host.innerHTML = `<div class="map"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="World map of located incidents"><path class="land" d="${land}"></path>${dots}</svg>
+  const count = (cls) => pts.filter((x) => POSITION[x.place_precision] === cls).length;
+  host.innerHTML = `<div class="legend maplegend"><span><i class="confirmed"></i>Confirmed position — a named place found in the gazetteer, or coordinates printed in the record (${fmt(count("confirmed"))})</span>
+      <span><i class="estimated"></i>Estimated position — approximate coordinates for a place the gazetteer does not hold (${fmt(count("estimated"))})</span>
+      <span><i class="coarse"></i>State or country centroid (${fmt(count("coarse"))})</span></div>
+    <div class="map"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="World map of located incidents"><path class="land" d="${land}"></path>${dots}</svg>
     <div class="mapctl"><button class="btn small" data-z="1.6" aria-label="Zoom in">+</button><button class="btn small" data-z="0.625" aria-label="Zoom out">−</button><button class="btn small" data-z="0" aria-label="Reset map">⟲</button></div></div>
-    <p class="muted small" style="margin-top:8px">${fmt(pts.length)} of ${fmt(incidents.length)} incidents could be placed. Filled dots are located to a city or a document-supported position; hollow rings are region or country centroids. Drag to pan; zoom with the buttons or Ctrl/⌘ + scroll.</p>`;
+    <p class="muted small" style="margin-top:8px">${fmt(pts.length)} of ${fmt(incidents.length)} incidents could be placed. Estimated positions are machine-supplied approximations checked only against the stated state or country; treat them as rough. A position may mark the observer rather than the object. Drag to pan; zoom with the buttons or Ctrl/⌘ + scroll.</p>`;
   const svg = $("svg", host); let vb = [0, 0, W, H];
   const apply = () => { svg.setAttribute("viewBox", vb.join(" ")); const k = vb[2] / W; $$(".dot", svg).forEach((d) => d.setAttribute("r", (+d.dataset.r * Math.max(k, 0.25)).toFixed(2))); };
   const zoom = (f, cx = vb[0] + vb[2] / 2, cy = vb[1] + vb[3] / 2) => {
@@ -203,17 +218,22 @@ async function drawMap(host, incidents) {
 /* ---------- overview ---------- */
 function viewOverview(main) {
   const ix = App.index, s = ix.stats, q = ix.quality, sum = ix.summary || {};
-  const reports = ix.reports, incidents = ix.incidents;
+  const reports = ix.reports, accounts = ix.incidents;
+  // The same event is often reported in several files. Every account is listed on the Incidents page; the figures here count each event once.
+  const incidents = accounts.filter((i) => !i.repeat), repeats = accounts.length - incidents.length;
   const title = (id) => { const r = App.reportById.get(id); return r ? `<a href="#/report/${encodeURIComponent(id)}">${esc(r.title)}</a>` : ""; };
-  const sighting = reports.filter((r) => r.disposition && r.disposition !== "not-a-sighting-record").length;
+  const withIncidents = reports.filter((r) => r.incidents > 0).length;
   const dispRows = Object.keys(LABELS.disposition).map((k) => ({ label: label("disposition", k), value: reports.filter((r) => r.disposition === k).length, color: COLORS.disposition[k], href: `#/reports?disposition=${k}` })).filter((r) => r.value);
-  const explRows = topRows(countBy(incidents, (i) => i.explanation), 12, (k, v) => ({ label: cap(k), value: v, href: `#/incidents?explanation=${k}` }));
-  const shapeRows = topRows(countBy(incidents.filter((i) => i.shape !== "not-described"), (i) => i.shape), 10, (k, v) => ({ label: cap(k), value: v, href: `#/incidents?shape=${k}` }));
-  const modeRows = topRows(countBy(incidents, (i) => i.modes), 12, (k, v) => ({ label: cap(k), value: v, href: `#/incidents?mode=${k}` }));
-  const agencyRows = topRows(countBy(reports, (r) => r.agency), 12, (k, v) => ({ label: k, value: v, href: `#/reports?agency=${encodeURIComponent(k)}` }));
-  const kindRows = topRows(countBy(reports, (r) => r.kind), 12, (k, v) => ({ label: cap(k), value: v, href: `#/reports?kind=${k}` }));
-  const themeRows = topRows(countBy(reports, (r) => r.themes), 12, (k, v) => ({ label: k, value: v, href: `#/reports?theme=${encodeURIComponent(k)}` }));
-  const bandRows = ["strong", "moderate", "limited", "minimal"].map((k) => ({ label: label("band", k), value: incidents.filter((i) => i.band === k).length, href: `#/incidents?band=${k}` }));
+  const explMap = countBy(incidents, (i) => i.explanation), shapeMap = countBy(incidents.filter((i) => i.shape !== "not-described"), (i) => i.shape), modeMap = countBy(incidents, (i) => i.modes);
+  const agencyMap = countBy(reports, (r) => r.agency), kindMap = countBy(reports, (r) => r.kind), themeMap = countBy(reports, (r) => r.themes);
+  const explRows = topRows(explMap, 12, (k, v) => ({ label: cap(k), value: v, href: `#/incidents?explanation=${k}&unique=1` }));
+  const shapeRows = topRows(shapeMap, 10, (k, v) => ({ label: cap(k), value: v, href: `#/incidents?shape=${k}&unique=1` }));
+  const modeRows = topRows(modeMap, 12, (k, v) => ({ label: cap(k), value: v, href: `#/incidents?mode=${k}&unique=1` }));
+  const agencyRows = topRows(agencyMap, 12, (k, v) => ({ label: k, value: v, href: `#/reports?agency=${encodeURIComponent(k)}` }));
+  const kindRows = topRows(kindMap, 12, (k, v) => ({ label: cap(k), value: v, href: `#/reports?kind=${k}` }));
+  const themeRows = topRows(themeMap, 12, (k, v) => ({ label: k, value: v, href: `#/reports?theme=${encodeURIComponent(k)}` }));
+  const bandRows = ["strong", "moderate", "limited", "minimal"].map((k) => ({ label: label("band", k), value: incidents.filter((i) => i.band === k).length, href: `#/incidents?band=${k}&unique=1` }));
+  const identified = incidents.filter((i) => i.status === "identified" || i.status === "probably-identified").length, unevaluated = incidents.filter((i) => i.status === "not-evaluated").length;
   const quotePct = q.quotes_total ? Math.round(((q.quotes_verified + q.quotes_approximate) / q.quotes_total) * 100) : null;
   const ocrTotal = Object.values(q.ocr_methods || {}).reduce((a, b) => a + b, 0);
   const modelTypes = (list) => [...new Set((Array.isArray(list) ? list : [list]).filter(Boolean).map((m) => String(m).replace(/^(remote|local) /, "")))].map((m) => m.charAt(0).toUpperCase() + m.slice(1)).join(", ") || "—";
@@ -226,7 +246,7 @@ function viewOverview(main) {
     <p class="lead">Every released document, image, video and audio recording has been transcribed, analysed and cross-referenced. Start with the overview below, then open any file's deep report for page-cited incidents, provenance, official handling and an explanation assessment.</p>
     <div class="tiles">
       <div class="tile"><b>${fmt(s.reports)}</b><span>source files analysed</span></div>
-      <div class="tile"><b>${fmt(s.incidents)}</b><span>incidents extracted</span></div>
+      <div class="tile"><b>${fmt(incidents.length)}</b><span>distinct incidents${repeats ? ` (${fmt(accounts.length)} accounts across files)` : ""}</span></div>
       <div class="tile"><b>${fmt(s.pages)}</b><span>pages read</span></div>
       <div class="tile"><b>${fmt(s.media_minutes)}</b><span>minutes of audio/video</span></div>
       <div class="tile"><b>${fmt(ix.releases.length)}</b><span>releases, latest ${esc(dateLabel((ix.releases[ix.releases.length - 1] || {}).date))}</span></div>
@@ -241,19 +261,19 @@ function viewOverview(main) {
   ${sum.overview ? `<section class="panel prose narrative"><div class="eyebrow">Corpus synthesis · machine-written from the per-file reports</div><h2>What the files show</h2>
      <div style="margin-top:10px">${sum.overview.split(/\n+/).map((p) => `<p>${esc(p)}</p>`).join("")}</div></section>` : ""}
   <div class="charts">
-    <section class="panel"><h2>How the files resolve</h2><p class="sub">Analyst disposition per file (${fmt(sighting)} of ${fmt(reports.length)} files concern sightings).</p>${barChart(dispRows, { unit: "files", labelW: 200 })}</section>
-    <section class="panel"><h2>Most plausible explanations</h2><p class="sub">Best-fit conventional explanation category per incident, on the evidence in the record.</p>${barChart(explRows, { unit: "incidents" })}</section>
-    <section class="panel"><h2>How incidents were observed</h2><p class="sub">Observation modes named in the record; an incident can have several.</p>${barChart(modeRows, { unit: "incidents" })}</section>
-    <section class="panel"><h2>Reported shapes</h2><p class="sub">Normalised from witness wording; undescribed objects omitted.</p>${barChart(shapeRows, { unit: "incidents" })}</section>
+    <section class="panel"><h2>How the files resolve</h2><p class="sub">Analyst disposition per file. ${fmt(withIncidents)} of ${fmt(reports.length)} files contain at least one extracted incident; “Contains incidents” marks files that bundle or mention incidents without being a single sighting record; those incidents are assessed one by one.</p>${barChart(dispRows, { unit: "files", labelW: 200 })}</section>
+    <section class="panel"><h2>Most plausible explanations</h2><p class="sub">Best-fit conventional explanation category per incident, on the evidence in the record — a machine assessment, not an official finding.${topNote(explMap, 12)}</p>${barChart(explRows, { unit: "incidents" })}</section>
+    <section class="panel"><h2>How incidents were observed</h2><p class="sub">Observation modes named in the record; an incident can have several.${topNote(modeMap, 12)}</p>${barChart(modeRows, { unit: "incidents" })}</section>
+    <section class="panel"><h2>Reported shapes</h2><p class="sub">Normalised from witness wording; undescribed objects omitted.${topNote(shapeMap, 10)}</p>${barChart(shapeRows, { unit: "incidents" })}</section>
     <section class="panel"><h2>Documentation strength</h2><p class="sub">How well each incident is documented (sensors, witnesses, specificity, verifiable quotes) — not how anomalous it is.</p>${barChart(bandRows, { unit: "incidents" })}</section>
-    <section class="panel"><h2>Releasing agencies</h2><p class="sub">Files by the agency credited in the release.</p>${barChart(agencyRows, { unit: "files" })}</section>
-    <section class="panel"><h2>Kinds of record</h2><p class="sub">What each file is.</p>${barChart(kindRows, { unit: "files" })}</section>
-    <section class="panel"><h2>Themes</h2><p class="sub">A file can carry several themes.</p>${barChart(themeRows, { unit: "files", labelW: 210 })}</section>
+    <section class="panel"><h2>Releasing agencies</h2><p class="sub">Files by the agency credited in the release.${topNote(agencyMap, 12)}</p>${barChart(agencyRows, { unit: "files" })}</section>
+    <section class="panel"><h2>Kinds of record</h2><p class="sub">What each file is.${topNote(kindMap, 12)}</p>${barChart(kindRows, { unit: "files" })}</section>
+    <section class="panel"><h2>Themes</h2><p class="sub">A file can carry several themes.${topNote(themeMap, 12)}</p>${barChart(themeRows, { unit: "files", labelW: 210 })}</section>
   </div>
   </div>
 
-  <section class="panel"><h2>Incidents over time</h2><p class="sub">Each column is the number of extracted incidents dated to that year, split by the status the record itself gives. Select a column to list them.</p>${timeline(incidents)}</section>
-  <section class="panel"><h2>Where incidents were reported</h2><p class="sub">Select a dot to open the incident. Position precision varies — see the note under the map.</p><div id="map"></div></section>
+  <section class="panel"><h2>Incidents over time</h2><p class="sub">Each column is the number of distinct incidents dated to that year${repeats ? ` (${fmt(repeats)} repeat accounts of the same event in other files are counted once)` : ""}, split by what the record itself concludes. Most reports were filed without any recorded evaluation: ${fmt(unevaluated)} of ${fmt(incidents.length)} have none, ${fmt(identified)} were identified or probably identified. “Unidentified” is used only where the record states that conclusion. Select a column to list the incidents.</p>${timeline(incidents)}</section>
+  <section class="panel"><h2>Where incidents were reported</h2><p class="sub">Select a dot to open the incident. Colour shows how each position was obtained.</p><div id="map"></div></section>
 
   ${sum.findings && sum.findings.length ? `<section class="panel findings-panel"><div class="findings-head"><div><div class="eyebrow">Patterns across the corpus</div><h2>Cross-cutting findings</h2></div><p class="sub">${sum.findings.length} findings that hold across files, eras and agencies. Each lists the reports that support it.</p></div>
      <ol class="findings">${sum.findings.map((f, i) => {
@@ -287,8 +307,10 @@ function viewOverview(main) {
       <div><p class="sub-h">Checks</p><dl class="kv">
         <dt>Quotes matched to page text</dt><dd>${quotePct == null ? "—" : quotePct + "%"} <span class="muted">(${fmt(q.quotes_verified)} exact, ${fmt(q.quotes_approximate)} approximate, ${fmt(q.quotes_unverified)} not found of ${fmt(q.quotes_total)}; quotes not found are hidden from the reports)</span></dd>
         <dt>Reports complete</dt><dd>${fmt(q.reports_complete)} of ${fmt(reports.length)}</dd>
-        <dt>Incidents dated</dt><dd>${fmt(q.dated_incidents)} of ${fmt(incidents.length)}</dd>
-        <dt>Incidents placed on the map</dt><dd>${fmt(q.located_incidents)} of ${fmt(incidents.length)}</dd>
+        <dt>Incident accounts</dt><dd>${fmt(accounts.length)} <span class="muted">(${fmt(repeats)} repeat an event reported in another file, leaving ${fmt(incidents.length)} distinct incidents)</span></dd>
+        <dt>Accounts dated</dt><dd>${fmt(q.dated_incidents)} of ${fmt(accounts.length)}</dd>
+        <dt>Accounts placed on the map</dt><dd>${fmt(q.located_incidents)} of ${fmt(accounts.length)}${q.positions ? ` <span class="muted">(${fmt((q.positions.city || 0) + (q.positions.stated || 0))} confirmed, ${fmt(q.positions.estimated || 0)} estimated, ${fmt((q.positions.region || 0) + (q.positions.country || 0))} state or country centroids)</span>` : ""}</dd>
+        ${q.corrections ? `<dt>Labels corrected for consistency</dt><dd><span class="muted">${fmt(q.corrections.status || 0)} statuses, ${fmt(q.corrections.hynek || 0)} Hynek classes, ${fmt(q.corrections.dates || 0)} placeholder dates — see <a href="#/about">Methods</a></span></dd>` : ""}
         <dt>Sources awaiting analysis</dt><dd>${fmt(q.pending_sources)}</dd></dl></div>
       <div><p class="sub-h">Model types</p><dl class="kv"><dt>OCR and analysis</dt><dd>${esc(modelTypes(q.models.review))}</dd><dt>Audio</dt><dd>${esc(modelTypes(q.models.audio))}</dd><dt>Embeddings</dt><dd>${esc(modelTypes(q.models.embedding))}</dd></dl></div>
     </div>
@@ -362,10 +384,11 @@ function reportCard(r) {
 /* ---------- incidents ---------- */
 function viewIncidents(main, params) {
   const all = App.index.incidents;
-  const keys = ["q", "from", "to", "country", "shape", "mode", "status", "hynek", "explanation", "band", "witness", "agency", "near", "sort", "dir"];
+  const keys = ["q", "from", "to", "country", "shape", "mode", "status", "hynek", "explanation", "band", "witness", "agency", "unique", "near", "sort", "dir"];
+  const repeats = all.filter((i) => i.repeat).length;
   const state = Object.fromEntries(keys.map((k) => [k, params.get(k) || ""]));
   let shown = 100;
-  main.innerHTML = `<h1>Incidents</h1><p class="muted" style="margin:6px 0 16px">Every specific observation event extracted from the files. Select a row to open it inside its source report.</p>
+  main.innerHTML = `<h1>Incidents</h1><p class="muted" style="margin:6px 0 16px">Every account of a specific observation event extracted from the files. The same event is often reported in more than one file${repeats ? ` (${fmt(repeats)} of these accounts repeat an event listed from another file)` : ""}; choose “One per event” to list each event once. Select a row to open it inside its source report.</p>
   <form class="filters" id="f">
     <label>Search<input type="search" name="q" value="${esc(state.q)}" placeholder="place, object, keyword"></label>
     <label>Year from<input type="number" name="from" value="${esc(state.from)}" min="1800" max="2100"></label>
@@ -379,6 +402,7 @@ function viewIncidents(main, params) {
     ${selectHtml("hynek", "Hynek class", optionsFrom(countBy(all, (i) => i.hynek), (k) => label("hynek", k)), state.hynek)}
     ${selectHtml("band", "Documentation", optionsFrom(countBy(all, (i) => i.band), (k) => label("band", k)), state.band)}
     ${selectHtml("agency", "Agency", optionsFrom(countBy(all, (i) => i.agency)), state.agency)}
+    <label>Accounts<select name="unique"><option value="">All accounts</option><option value="1"${state.unique ? " selected" : ""}>One per event</option></select></label>
     <button type="reset" class="btn">Clear</button>
   </form>
   <div class="resultbar"><span id="count"></span><span><button class="btn small" id="csv">Download CSV</button> <button class="btn small" id="json">Download JSON</button></span></div>
@@ -392,13 +416,14 @@ function viewIncidents(main, params) {
     current = all.filter((i) => (!state.q || matchesText(hay.get(i.id), state.q)) && (!state.from || (i.year && i.year >= +state.from)) && (!state.to || (i.year && i.year <= +state.to))
       && (!state.country || i.country === state.country) && (!state.shape || i.shape === state.shape) && (!state.mode || i.modes.includes(state.mode)) && (!state.witness || i.witnesses.includes(state.witness))
       && (!state.status || i.status === state.status) && (!state.hynek || i.hynek === state.hynek) && (!state.explanation || i.explanation === state.explanation) && (!state.band || i.band === state.band)
-      && (!state.agency || i.agency === state.agency) && (!near || (i.lat != null && i.lat.toFixed(1) == near[0].toFixed(1) && i.lon.toFixed(1) == near[1].toFixed(1))));
+      && (!state.agency || i.agency === state.agency) && (!state.unique || !i.repeat) && (!near || (i.lat != null && i.lat.toFixed(1) == near[0].toFixed(1) && i.lon.toFixed(1) == near[1].toFixed(1))));
     const key = state.sort || "date", dir = state.dir === "desc" ? -1 : 1;
     current.sort((a, b) => { const x = a[key] ?? "", y = b[key] ?? ""; if (x === "" && y !== "") return 1; if (y === "" && x !== "") return -1; return (typeof x === "number" ? x - y : String(x).localeCompare(String(y))) * dir; });
-    $("#count").textContent = `${fmt(current.length)} of ${fmt(all.length)} incidents${near ? " at the selected map position" : ""}`;
+    const pool = state.unique ? all.length - repeats : all.length;
+    $("#count").textContent = `${fmt(current.length)} of ${fmt(pool)} ${state.unique ? "distinct incidents" : "incident accounts"}${near ? " at the selected map position" : ""}`;
     $("#rows").innerHTML = current.slice(0, shown).map((i) => `<tr class="click" data-href="#/report/${encodeURIComponent(i.report)}?incident=${encodeURIComponent(i.id)}" tabindex="0">
-      <td style="white-space:nowrap">${esc(dateLabel(i.date) || i.date_text || "undated")}</td><td><b>${esc(i.title)}</b><div class="muted small">${esc(i.snippet)}${i.snippet.length >= 240 ? "…" : ""}</div></td>
-      <td>${esc(i.place || "—")}${i.place_precision === "country" || i.place_precision === "region" ? ' <span class="dim small">(approx.)</span>' : ""}</td><td>${esc(i.shape === "not-described" ? "—" : cap(i.shape))}</td>
+      <td style="white-space:nowrap">${esc(dateLabel(i.date) || i.date_text || "undated")}</td><td><b>${esc(i.title)}</b>${i.repeat ? ' <span class="chip small">repeat account</span>' : i.accounts > 1 ? ` <span class="chip small">${i.accounts} accounts</span>` : ""}<div class="muted small">${esc(i.snippet)}${i.snippet.length >= 240 ? "…" : ""}</div></td>
+      <td>${esc(i.place || "—")}${POSITION[i.place_precision] === "coarse" ? ' <span class="dim small">(centroid)</span>' : POSITION[i.place_precision] === "estimated" ? ' <span class="dim small">(estimated)</span>' : ""}</td><td>${esc(i.shape === "not-described" ? "—" : cap(i.shape))}</td>
       <td>${badge("status", i.status)}</td><td>${esc(cap(i.explanation))}${i.likelihood ? `<div class="muted small">${esc(i.likelihood)}</div>` : ""}</td><td class="num">${i.strangeness}/5</td><td class="num">${i.score}<div class="muted small">${esc(label("band", i.band))}</div></td></tr>`).join("")
       || `<tr><td colspan="8" class="empty">No incidents match these filters.</td></tr>`;
     $("#more").hidden = current.length <= shown;
@@ -412,7 +437,7 @@ function viewIncidents(main, params) {
   $("#more").addEventListener("click", () => { shown += 200; render(); });
   $("#json").addEventListener("click", () => download("uap-incidents.json", JSON.stringify(current, null, 1), "application/json"));
   $("#csv").addEventListener("click", () => {
-    const cols = ["id", "report", "title", "date", "date_text", "date_precision", "place", "lat", "lon", "place_precision", "country", "shape", "modes", "witnesses", "witness_count", "status", "hynek", "explanation", "likelihood", "strangeness", "score", "band", "agency", "media", "snippet"];
+    const cols = ["id", "report", "title", "date", "date_text", "date_precision", "place", "lat", "lon", "place_precision", "country", "shape", "modes", "witnesses", "witness_count", "status", "hynek", "explanation", "likelihood", "strangeness", "score", "band", "agency", "media", "event", "accounts", "repeat", "snippet"];
     const cell = (v) => `"${String(Array.isArray(v) ? v.join("; ") : v ?? "").replace(/"/g, '""')}"`;
     download("uap-incidents.csv", [cols.join(",")].concat(current.map((i) => cols.map((c) => cell(i[c])).join(","))).join("\n"), "text/csv");
   });
@@ -492,13 +517,15 @@ function viewAbout(main) {
     <p><b>1. Collection.</b> Files are downloaded from the Department of War PURSUE release manifest and checked for completeness (size, file signature, checksum). ${fmt(App.index.stats.reports)} files are analysed here${q.pending_sources ? `; ${q.pending_sources} more are awaiting analysis` : ""}.</p>
     <p><b>2. Text extraction.</b> Every scanned page is transcribed by a vision language model, which also notes handwriting, redactions, markings and pictures. Embedded text layers in scans are not trusted. If the primary model fails, a second local model is tried, then Tesseract OCR, then the embedded text layer; the path used is recorded per page. Video is sampled into frames that are described by the model; audio is transcribed in full, with official captions used where the publisher provides them.</p>
     <p><b>3. Analysis.</b> The whole text of each file is read in page-aligned parts — nothing is sampled. Each part is mined for constituent records, incidents, people, organizations and key passages, then a file-level report is written. Quoted passages are checked against the extracted page text and labelled exact or approximate; quotes that cannot be found in the page text are not shown.</p>
-    <p><b>4. Normalisation.</b> Dates are parsed conservatively (impossible dates are dropped, not guessed). Places are matched to a gazetteer and carry a precision level. Related reports and repeated accounts of the same event are linked with text embeddings.</p>
-    <p><b>5. Connections.</b> Incidents are connected only by explicit factors, each stated on the link: same time and place (within a day and 150 km), matching description (same shape and colour within a week and 800 km), the same account in another file (a text match whose dates and places agree), a named person, or a mission or vessel. Text similarity alone never connects two incidents.</p></section>
+    <p><b>4. Consistency checks.</b> Each machine-assigned label is checked against the facts recorded beside it, by fixed rules rather than a model. ${q.corrections ? `In this build they changed ${fmt(q.corrections.status || 0)} statuses, ${fmt(q.corrections.hynek || 0)} Hynek classes, ${fmt(q.corrections.dates || 0)} dates and ${fmt(q.corrections.disposition || 0)} file dispositions. ` : ""}An incident is “unidentified” only where the record states that conclusion or the publisher designates the case unresolved; a report with no recorded evaluation is “no evaluation in the record”. A Hynek class must agree with the recorded light and sensors. A camera or system default timestamp (such as 12/31/99) is not used as a date. A likelihood is shown only for a named explanation. A file that bundles incidents is labelled as containing incidents rather than given one disposition.</p>
+    <p><b>5. Normalisation.</b> Dates are parsed conservatively (impossible dates are dropped, not guessed). Places are matched to a gazetteer. A position is <em>confirmed</em> when the named place is found in the gazetteer or the record prints coordinates; <em>estimated</em> when it rests on approximate coordinates supplied by the model for a place the gazetteer does not hold, checked only against the stated state or country; otherwise a state or country centroid. Related reports are linked with text embeddings.</p>
+    <p><b>6. Repeat accounts.</b> The same event is often reported in several files. Accounts are treated as one event when their texts match closely, their dates agree and their places do not conflict, with at most one account per file. Every account stays listed; the overview counts each event once, using its best-documented account${q.repeat_accounts != null ? ` (${fmt(q.repeat_accounts)} repeat accounts in this build)` : ""}. The matching is approximate, so the count of distinct incidents is an estimate.</p>
+    <p><b>7. Connections.</b> Incidents are connected only by explicit factors, each stated on the link: same time and place (within a day and 150 km), matching description (same shape and colour within a week and 800 km), the same account in another file (the repeat accounts above), a named person, or a mission or vessel. Text similarity alone never connects two incidents.</p></section>
   <section class="panel"><h2>Scales used in the reports</h2><dl class="kv">
-    <dt>Disposition</dt><dd>The analyst's reading of the file: explained in the record, likely explained, insufficient information, unexplained in the record, or not a sighting record. "Unexplained in the record" means the file offers no resolution — not that the event is anomalous.</dd>
-    <dt>Status in record</dt><dd>What the record itself says about an incident, kept separate from the analyst assessment.</dd>
-    <dt>Likelihood wording</dt><dd>Almost no chance (1–5%), very unlikely (5–20%), unlikely (20–45%), roughly even chance (45–55%), likely (55–80%), very likely (80–95%), almost certain (95–99%) — the intelligence-community estimative scale.</dd>
-    <dt>Hynek class</dt><dd>Nocturnal light, daylight disc, radar-visual, and close encounters of the first (within about 150 m), second (physical effects) and third (occupants) kind.</dd>
+    <dt>Disposition</dt><dd>The analyst's reading of the file: explained in the record, likely explained, insufficient information, unexplained in the record, contains incidents (a compilation, study or correspondence file whose incidents are assessed one by one rather than as a whole), or not a sighting record. "Unexplained in the record" means the file offers no resolution — not that the event is anomalous.</dd>
+    <dt>Status in record</dt><dd>What the record itself concludes about an incident, kept separate from the analyst assessment: identified, probably identified, unidentified (the record says so, or the publisher designates the case unresolved), insufficient information, or no evaluation in the record. Most reports were filed without an evaluation; that is not the same as officially unidentified.</dd>
+    <dt>Likelihood wording</dt><dd>How likely the named conventional explanation is to be correct; not given when no explanation is identified. Almost no chance (1–5%), very unlikely (5–20%), unlikely (20–45%), roughly even chance (45–55%), likely (55–80%), very likely (80–95%), almost certain (95–99%) — the intelligence-community estimative scale.</dd>
+    <dt>Hynek class</dt><dd>Nocturnal light (a distant light at night), daylight disc (a distant object in daylight, of any shape), radar-visual (radar with visual confirmation), and close encounters of the first (within about 150 m), second (physical effects) and third (occupants) kind. The first three are checked against the recorded light and sensors.</dd>
     <dt>Vallée class and SVP</dt><dd>Type AN (anomaly), FB (fly-by), MA (manoeuvre) or CE (close encounter), each 1–5. SVP rates source reliability, site visit and possible explanations 0–4 each; a higher last digit means fewer natural explanations fit.</dd>
     <dt>Admiralty code</dt><dd>Source reliability A (completely reliable) to F (cannot be judged); information credibility 1 (confirmed) to 6 (cannot be judged). The two are rated separately.</dd>
     <dt>Strangeness</dt><dd>1–5: how hard the incident <em>as reported</em> is to reconcile with known phenomena. It does not measure how reliable the report is.</dd>
@@ -508,8 +535,9 @@ function viewAbout(main) {
     <li>Everything here is a machine-generated research aid. Check the cited page of the original file before quoting or relying on a claim.</li>
     <li>Transcription of poor scans, handwriting and teletype can be wrong; redacted text is never guessed.</li>
     <li>Sizes, speeds and altitudes in the records are usually witness estimates.</li>
-    <li>Map positions are often approximate, and may mark the observer rather than the object.</li>
-    <li>Counts depend on how files bundle or repeat incidents; the same event can appear in several files.</li></ul></section>
+    <li>Map positions are often approximate — estimated positions especially — and may mark the observer rather than the object.</li>
+    <li>Counts depend on how files bundle or repeat incidents. Repeat accounts are matched automatically and imperfectly: some repeats are missed and a few distinct sightings may be merged.</li>
+    <li>The corpus overview is written by a model from per-file summaries and corpus statistics. Its figures are checked against the data at build time, but its wording is a summary, not a finding.</li></ul></section>
   ${App.index.pending.length ? `<section class="panel"><h2>Awaiting analysis</h2><ul class="tight">${App.index.pending.map((p) => `<li>${esc(p.title)} <span class="muted">(${esc(p.media)}, ${esc(p.agency)})</span></li>`).join("")}</ul></section>` : ""}`;
 }
 
@@ -530,5 +558,5 @@ async function boot() {
   window.addEventListener("hashchange", route);
   route();
 }
-Object.assign(window, { App, $, $$, esc, fmt, cap, label, badge, dateLabel, bindTips, bindChartLinks, download, LABELS, COLORS });
+Object.assign(window, { App, $, $$, esc, fmt, cap, label, badge, dateLabel, bindTips, bindChartLinks, download, LABELS, COLORS, POSITION });
 boot();

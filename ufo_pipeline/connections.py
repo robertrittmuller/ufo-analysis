@@ -4,7 +4,8 @@ Every link carries the factor(s) that made it and a plain reason ("same day, 12 
 
 - time_place   both dated to the day, at most 1 day apart and at most 150 km apart (city-level or better positions)
 - description  same specific shape and a shared colour, at most 7 days and 800 km apart
-- same_event   the embed stage's text match, kept only when the dates and places also agree
+- same_event   accounts of one event in different files: a close text match whose dates agree and whose places do not
+               conflict, at most one account per file (see event_groups)
 - person       a named person appears in both accounts (hub node: the person)
 - mission      the same spacecraft mission or named vessel (hub node: the mission)
 
@@ -26,7 +27,7 @@ from .geo import distance_km
 FACTORS = {
     "time_place": {"label": "Same time and place", "detail": "Dated to the day, at most 1 day and 150 km apart"},
     "description": {"label": "Matching description", "detail": "Same specific shape and colour, within 7 days and 800 km"},
-    "same_event": {"label": "Same account in another file", "detail": "Text match whose dates and places also agree"},
+    "same_event": {"label": "Same account in another file", "detail": "Text match whose dates agree and whose places do not conflict"},
     "person": {"label": "Same named person", "detail": "The same person is named in both accounts"},
     "mission": {"label": "Same mission or vessel", "detail": "Observed from the same spacecraft mission or named ship"},
 }
@@ -34,7 +35,7 @@ PAIR_FACTORS = ("time_place", "description", "same_event")
 
 GENERIC_SHAPES = {"not-described", "other", "irregular", "multiple-shapes", "light-point", ""}
 COLOURS = ["white", "orange", "red", "green", "blue", "silver", "aluminum", "metallic", "black", "yellow", "gray", "grey"]
-PRECISE = {"city", "estimated"}
+PRECISE = {"city", "stated", "estimated"}
 RANKS = re.compile(r"^(mr|mrs|ms|miss|dr|prof|capt|captain|lt|lieutenant|col|colonel|maj|major|gen|general|sgt|sergeant|cpl|corporal|"
                    r"pvt|private|adm|admiral|cdr|commander|ens|ensign|mg|bg|ltc|lt\.? ?col|sen|senator|rep|gov|governor|rev|sa|agent|"
                    r"officer|patrolman|deputy|sheriff|chief|airman|a/?1c|a/?2c|t/?sgt|s/?sgt|m/?sgt|1st|2nd|first|second|mrs\.)\.?$", re.I)
@@ -104,13 +105,64 @@ def _missions(inc: Dict[str, Any]) -> List[Tuple[str, str]]:
     return out
 
 
+def places_conflict(a: Dict[str, Any], b: Dict[str, Any], limit_km: float = 200) -> bool:
+    """True when two incidents are recorded in clearly different places (positions, else state, else country)."""
+    pa, pb = _point(a), _point(b)
+    if pa is not None and pb is not None:
+        return distance_km(pa, pb) > limit_km
+    la, lb = a.get("location") or {}, b.get("location") or {}
+    if la.get("region") and lb.get("region") and la.get("country") == lb.get("country"):
+        return la["region"] != lb["region"]
+    if la.get("country") and lb.get("country"):
+        return la["country"] != lb["country"]
+    return False
+
+
 def same_event_agrees(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
-    """Keep a text match only when the dates and places agree (never on similarity alone)."""
+    """Keep a text match only when the dates agree and the places do not conflict (never on similarity alone)."""
     da, db = _reliable_date(a), _reliable_date(b)
     if da.get("precision") == "day" and db.get("precision") == "day":
-        return da.get("iso") == db.get("iso")
+        return da.get("iso") == db.get("iso") and not places_conflict(a, b)
     pa, pb = _point(a), _point(b)
     return bool(da.get("year")) and da.get("year") == db.get("year") and pa is not None and pb is not None and distance_km(pa, pb) <= 200
+
+
+def event_groups(incidents: List[Dict[str, Any]], report_of: Dict[str, str], same_event: Dict[str, List[str]],
+                 similarity: Any) -> List[List[str]]:
+    """Groups of incident ids that are accounts of ONE event in different files.
+
+    The embed stage proposes candidates (its groups are transitive, so they also chain different sightings of the
+    same day). A pair is kept only when its own text similarity is high enough, its dates agree and its places do
+    not conflict; pairs are then merged best-first, and a group never takes two accounts from the same file,
+    because accounts the analysis kept apart within one file are different sightings.
+    """
+    by_id = {inc["id"]: inc for inc in incidents}
+    pairs: List[Tuple[float, str, str]] = []
+    seen: set = set()
+    for member, others in same_event.items():
+        for other in others:
+            key = (min(member, other), max(member, other))
+            if key in seen or member not in by_id or other not in by_id or report_of[member] == report_of[other]:
+                continue
+            seen.add(key)
+            a, b = by_id[member], by_id[other]
+            if not same_event_agrees(a, b):
+                continue
+            score = similarity(member, other)
+            same_day = _reliable_date(a).get("precision") == "day" and _reliable_date(b).get("precision") == "day"
+            needed = (0.72 if _point(a) and _point(b) else 0.78) if same_day else 0.85
+            if score is not None and score >= needed:
+                pairs.append((score, key[0], key[1]))
+    group_of: Dict[str, set] = {}
+    for _score, a, b in sorted(pairs, reverse=True):
+        ga, gb = group_of.get(a) or {a}, group_of.get(b) or {b}
+        if ga is gb or {report_of[i] for i in ga} & {report_of[i] for i in gb}:
+            continue
+        merged = ga | gb
+        for i in merged:
+            group_of[i] = merged
+    unique = {id(g): g for g in group_of.values()}
+    return sorted((sorted(g) for g in unique.values()), key=lambda g: (-len(g), g[0]))
 
 
 def _layout(n: int, edges: List[Tuple[int, int, float]], seed: int, gravity: float = 0.01) -> np.ndarray:
@@ -162,7 +214,8 @@ def _pack(radii: np.ndarray) -> np.ndarray:
     return pos.astype(np.float32)
 
 
-def build(reports: List[Dict[str, Any]], same_event: Dict[str, List[str]]) -> Dict[str, Any]:
+def build(reports: List[Dict[str, Any]], groups: List[List[str]]) -> Dict[str, Any]:
+    """`groups` are the same-event groups from event_groups(): every pair inside one is a same_event link."""
     incidents: List[Dict[str, Any]] = []
     for report in reports:
         for inc in report.get("incidents") or []:
@@ -200,14 +253,11 @@ def build(reports: List[Dict[str, Any]], same_event: Dict[str, List[str]]) -> Di
                     if shape not in GENERIC_SHAPES and shape == (ib.get("object") or {}).get("shape") and common and km <= 800:
                         link(a, b, "description", f"both {shape.replace('-', ' ')}, {', '.join(sorted(common))}; {when}, {km:.0f} km apart")
 
-    for member, others in same_event.items():
-        a = index.get(member)
-        for other in others:
-            b = index.get(other)
-            if a is None or b is None or incidents[a]["_report"] == incidents[b]["_report"]:
-                continue
-            if same_event_agrees(incidents[a], incidents[b]):
-                link(a, b, "same_event", "the same account in another file; dates and places agree")
+    for members in groups:
+        for x, first in enumerate(members):
+            for second in members[x + 1:]:
+                if first in index and second in index:
+                    link(index[first], index[second], "same_event", "the same account in another file; dates agree and places do not conflict")
 
     # hubs: named people and missions
     variants: Dict[str, set] = defaultdict(set)
