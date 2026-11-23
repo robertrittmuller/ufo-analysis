@@ -73,10 +73,11 @@ def _shell(title: str, description: str, url: str, image: str, body: str, json_l
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><span>Declassified <em>UFO Files</em></span></a>
   <nav class="nav" aria-label="Sections">
-    <a href="/">Overview</a><a href="/{PAGES_DIR}/">All files</a><a href="/#/incidents">Incidents</a><a href="/#/search">Full-text search</a><a href="/#/about">Methods</a>
+    <a href="/">Overview</a><a href="/{PAGES_DIR}/">All files</a><a href="/#/incidents">Incidents</a><a href="/#/connections">Connections</a><a href="/#/search">Full-text search</a><a href="/#/about">Methods</a>
   </nav>
 </header>
 <main class="static-page">
+<p class="disclaimer small"><b>Not a government website.</b> An independent project, not affiliated with or endorsed by the U.S. Department of War or any government agency. Source files come from the Department of War's public <a href="https://www.war.gov/ufo/" rel="noopener">PURSUE release</a>.</p>
 {body}
 </main>
 <footer class="footer">
@@ -117,7 +118,7 @@ def _report_page(report: Dict[str, Any], compact: Dict[str, Any], base: str) -> 
     parts = [f"""<nav class="crumbs small"><a href="/">Home</a> › <a href="/{PAGES_DIR}/">All files</a> › {_e(_clip(title_text, 80))}</nav>
 <article>
 <header class="panel">
-  <div class="eyebrow">{_e(compact.get("agency") or "U.S. government")} · {_e(MEDIA.get(media, "Record"))} · released {_e(compact.get("release"))}</div>
+  <div class="eyebrow">{_e(MEDIA.get(media, "Record"))} · source: {_e(compact.get("agency") or "U.S. government")} · released {_e(compact.get("release"))}</div>
   <h1>{_e(title_text)}</h1>
   <div class="cta"><a class="btn primary" href="{_e(app_url)}">Open the interactive report</a>
   {f'<a class="btn" href="{_e(manifest["original_source_url"])}" rel="noopener">Original file ↗</a>' if manifest.get("original_source_url") else ""}</div>
@@ -146,10 +147,11 @@ def _report_page(report: Dict[str, Any], compact: Dict[str, Any], base: str) -> 
 <p>{_e(inc.get("narrative"))}</p>{f'<p class="small"><b>Most plausible explanation:</b> {_e(explanation)}</p>' if explanation else ""}</div>""")
         parts.append(f'<section class="panel"><h2>Incidents in this file ({len(incidents)})</h2>{"".join(rows)}</section>')
 
-    passages = [p for p in report.get("key_passages") or [] if isinstance(p, dict) and p.get("text")]
+    passages = [p for p in report.get("key_passages") or []
+                if isinstance(p, dict) and p.get("text") and p.get("check") != "unverified"]
     if passages:
         parts.append('<section class="panel prose"><h2>Key passages</h2>' + "".join(
-            f'<blockquote><p>“{_e(p["text"])}”</p><p class="small muted">p. {_e(p.get("page"))}{" — " + _e(p["why"]) if p.get("why") else ""}</p></blockquote>'
+            f'<blockquote><p>“{_e(p["text"])}”</p><p class="small muted">p. {_e(p.get("page"))}{" · close match to page text" if p.get("check") == "approximate" else ""}{" — " + _e(p["why"]) if p.get("why") else ""}</p></blockquote>'
             for p in passages) + "</section>")
 
     related = report.get("related") or []
@@ -193,7 +195,7 @@ def _index_page(compacts: List[Dict[str, Any]], base: str) -> str:
     title = f"All Declassified UFO Files: {len(rows)} Government UAP Records"
     description = (f"Every one of the {len(rows)} declassified U.S. government UFO/UAP files in the PURSUE release, "
                    "with a summary, incidents and transcript for each.")
-    body = f"""<section class="panel"><div class="eyebrow">U.S. Department of War · PURSUE releases</div><h1>All declassified UFO files</h1>
+    body = f"""<section class="panel"><div class="eyebrow">Independent analysis of public government records</div><h1>All declassified UFO files</h1>
 <p class="sub">{len(rows)} documents, images, videos and audio recordings, newest release first. Each page has a summary, the incidents it describes and its transcript.
 For filters and charts, use the <a href="/#/reports">interactive report browser</a>.</p><ul class="tight file-list">{items}</ul></section>"""
     json_ld = {"@context": "https://schema.org", "@type": "CollectionPage", "name": title, "description": description, "url": url}

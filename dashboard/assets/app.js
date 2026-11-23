@@ -74,12 +74,12 @@ function route() {
   tip.hide();
   const { parts, params } = parseHash();
   const view = parts[0] || "overview";
-  $$(".nav a").forEach((a) => a.classList.toggle("on", a.dataset.nav === (view === "report" ? "reports" : view)));
+  $$(".nav a").forEach((a) => a.classList.toggle("on", a.dataset.nav === (view === "report" ? "reports" : view === "events" ? "connections" : view)));
   const main = $("#main");
-  const views = { overview: viewOverview, reports: viewReports, incidents: viewIncidents, entities: viewEntities, search: viewSearch, about: viewAbout };
+  const views = { overview: viewOverview, reports: viewReports, incidents: viewIncidents, connections: window.viewConnections, events: window.viewConnections, entities: viewEntities, search: viewSearch, about: viewAbout };
   if (view === "report") return window.viewReport(main, parts[1], params);
   (views[view] || viewOverview)(main, params);
-  document.title = view === "overview" ? SITE_TITLE : `${cap(view)} | ${SITE_NAME}`;
+  document.title = view === "overview" ? SITE_TITLE : `${view === "events" ? "Connections" : cap(view)} | ${SITE_NAME}`;
   if (!params.toString()) window.scrollTo(0, 0);
 }
 
@@ -106,9 +106,15 @@ function timeline(incidents) {
   const years = incidents.filter((i) => i.year).map((i) => i.year);
   if (!years.length) return `<p class="muted small">No dated incidents.</p>`;
   const series = ["identified", "probably-identified", "insufficient-information", "unidentified", "not-evaluated"];
-  const lo = Math.min(...years), hi = Math.max(...years);
+  // A few early outliers (e.g. one 1800 account) would stretch the axis across decades of empty years:
+  // start where the record becomes continuous (no gap over MAX_GAP years) and fold anything earlier into one "before" column.
+  const MAX_GAP = 10, distinct = [...new Set(years)].sort((a, b) => a - b);
+  let start = distinct[distinct.length - 1];
+  for (let k = distinct.length - 1; k > 0 && distinct[k] - distinct[k - 1] <= MAX_GAP; k--) start = distinct[k - 1];
+  const early = distinct[0] < start;
+  const lo = early ? start - 1 : start, hi = Math.max(...years);
   const counts = new Map();
-  incidents.forEach((i) => { if (!i.year) return; const c = counts.get(i.year) || {}; c[i.status] = (c[i.status] || 0) + 1; counts.set(i.year, c); });
+  incidents.forEach((i) => { if (!i.year) return; const yr = Math.max(i.year, lo); const c = counts.get(yr) || {}; c[i.status] = (c[i.status] || 0) + 1; counts.set(yr, c); });
   const span = hi - lo + 1, W = 1100, H = 230, padL = 36, padB = 24, padT = 8;
   const slot = (W - padL) / span, bw = Math.max(2, Math.min(24, slot - 2));
   const max = Math.max(...Array.from(counts.values()).map((c) => Object.values(c).reduce((a, b) => a + b, 0)));
@@ -118,7 +124,9 @@ function timeline(incidents) {
   const step = span > 60 ? 10 : span > 25 ? 5 : 1;
   for (let y = lo; y <= hi; y++) {
     const x = padL + (y - lo) * slot + (slot - bw) / 2;
-    if (y % step === 0) out += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">${y}</text>`;
+    const before = early && y === lo;
+    if (before) out += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">&lt;${start}</text>`;
+    else if (y % step === 0 && !(early && y - lo < 3)) out += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">${y}</text>`;
     const c = counts.get(y);
     if (!c) continue;
     let acc = 0;
@@ -131,7 +139,7 @@ function timeline(incidents) {
       marks += `<rect fill="${COLORS.status[s]}" x="${x}" y="${y1}" width="${bw}" height="${Math.max(1, y0 - y1 - (acc ? 1.5 : 0))}" rx="${acc + c[s] === total ? 2 : 0}"></rect>`;
       acc += c[s];
     });
-    out += `<g class="row" data-href="#/incidents?from=${y}&to=${y}" tabindex="0" role="link" aria-label="${y}: ${total} incidents" data-tip="${esc(`<b>${y}</b>${total} incident${total === 1 ? "" : "s"}<div class="muted">${lines}</div>`)}">
+    out += `<g class="row" data-href="${before ? `#/incidents?to=${start - 1}` : `#/incidents?from=${y}&to=${y}`}" tabindex="0" role="link" aria-label="${before ? `Before ${start}` : y}: ${total} incidents" data-tip="${esc(`<b>${before ? `Before ${start}` : y}</b>${total} incident${total === 1 ? "" : "s"}<div class="muted">${lines}</div>`)}">
       <rect class="hit" x="${padL + (y - lo) * slot}" y="${padT}" width="${slot}" height="${H - padB - padT}"></rect><g class="mark">${marks}</g></g>`;
   }
   out += `<line class="axisl" x1="${padL}" x2="${W}" y1="${H - padB}" y2="${H - padB}"></line>`;
@@ -208,11 +216,12 @@ function viewOverview(main) {
   const bandRows = ["strong", "moderate", "limited", "minimal"].map((k) => ({ label: label("band", k), value: incidents.filter((i) => i.band === k).length, href: `#/incidents?band=${k}` }));
   const quotePct = q.quotes_total ? Math.round(((q.quotes_verified + q.quotes_approximate) / q.quotes_total) * 100) : null;
   const ocrTotal = Object.values(q.ocr_methods || {}).reduce((a, b) => a + b, 0);
+  const modelTypes = (list) => [...new Set((Array.isArray(list) ? list : [list]).filter(Boolean).map((m) => String(m).replace(/^(remote|local) /, "")))].map((m) => m.charAt(0).toUpperCase() + m.slice(1)).join(", ") || "—";
   const methodName = { llm_ocr: "Vision-model OCR", native: "Born-digital text", tesseract: "Tesseract fallback", text_layer: "Embedded text layer fallback", failed: "Unreadable", publisher: "Publisher description", frames: "Frame analysis", captions: "Official captions", asr: "Machine transcript" };
 
   main.innerHTML = `
   <section class="hero">
-    <div class="eyebrow">U.S. Department of War · PURSUE releases</div>
+    <div class="eyebrow">Independent analysis of public government records</div>
     <h1>THE DECLASSIFIED UFO FILES</h1>
     <p class="lead">Every released document, image, video and audio recording has been transcribed, analysed and cross-referenced. Start with the overview below, then open any file's deep report for page-cited incidents, provenance, official handling and an explanation assessment.</p>
     <div class="tiles">
@@ -223,6 +232,7 @@ function viewOverview(main) {
       <div class="tile"><b>${fmt(ix.releases.length)}</b><span>releases, latest ${esc(dateLabel((ix.releases[ix.releases.length - 1] || {}).date))}</span></div>
     </div>
     <div class="cta"><a class="btn primary" href="#/reports">Browse the reports</a><a class="btn" href="#/incidents">Explore incidents</a><a class="btn" href="#/search">Search the full text</a></div>
+    <p class="disclaimer"><b>Not a government website.</b> This is an independent project, not affiliated with or endorsed by the U.S. Department of War or any government agency. The source files come from the Department of War's public <a href="https://www.war.gov/ufo/" rel="noopener">PURSUE release</a>.</p>
   </section>
   ${ix.partial ? `<div class="warnbox"><b>Partial build.</b> This site was built from a subset of the corpus.</div>` : ""}
   ${ix.pending.length ? `<div class="warnbox"><b>${ix.pending.length} source file${ix.pending.length === 1 ? " is" : "s are"} not analysed yet</b> and ${ix.pending.length === 1 ? "is" : "are"} missing from the figures below. <a href="#/about">See data quality</a>.</div>` : ""}
@@ -256,12 +266,12 @@ function viewOverview(main) {
     <div class="grid g3" style="margin-bottom:0">
       <div><p class="sub-h">Text extraction (${fmt(ocrTotal)} pages)</p>${barChart(Object.entries(q.ocr_methods || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: methodName[k] || k, value: v })), { unit: "pages", labelW: 200 })}</div>
       <div><p class="sub-h">Checks</p><dl class="kv">
-        <dt>Quotes matched to page text</dt><dd>${quotePct == null ? "—" : quotePct + "%"} <span class="muted">(${fmt(q.quotes_verified)} exact, ${fmt(q.quotes_approximate)} approximate, ${fmt(q.quotes_unverified)} not found of ${fmt(q.quotes_total)})</span></dd>
+        <dt>Quotes matched to page text</dt><dd>${quotePct == null ? "—" : quotePct + "%"} <span class="muted">(${fmt(q.quotes_verified)} exact, ${fmt(q.quotes_approximate)} approximate, ${fmt(q.quotes_unverified)} not found of ${fmt(q.quotes_total)}; quotes not found are hidden from the reports)</span></dd>
         <dt>Reports complete</dt><dd>${fmt(q.reports_complete)} of ${fmt(reports.length)}</dd>
         <dt>Incidents dated</dt><dd>${fmt(q.dated_incidents)} of ${fmt(incidents.length)}</dd>
         <dt>Incidents placed on the map</dt><dd>${fmt(q.located_incidents)} of ${fmt(incidents.length)}</dd>
         <dt>Sources awaiting analysis</dt><dd>${fmt(q.pending_sources)}</dd></dl></div>
-      <div><p class="sub-h">Model types</p><dl class="kv"><dt>OCR and analysis</dt><dd>${esc((q.models.review || []).join(" → ") || "—")}</dd><dt>Audio</dt><dd>${esc((q.models.audio || []).join(" → ") || "—")}</dd><dt>Embeddings</dt><dd>${esc(q.models.embedding || "—")}</dd></dl></div>
+      <div><p class="sub-h">Model types</p><dl class="kv"><dt>OCR and analysis</dt><dd>${esc(modelTypes(q.models.review))}</dd><dt>Audio</dt><dd>${esc(modelTypes(q.models.audio))}</dd><dt>Embeddings</dt><dd>${esc(modelTypes(q.models.embedding))}</dd></dl></div>
     </div>
     ${q.issues.length ? `<details class="more"><summary>${q.issues.length} report${q.issues.length === 1 ? "" : "s"} with known gaps</summary><ul class="tight">${q.issues.map((i) => `<li><a href="#/report/${encodeURIComponent(i.id)}">${esc(i.title)}</a> — <span class="muted">${esc(i.problems.join("; "))}</span></li>`).join("")}</ul></details>` : ""}
   </section>`;
@@ -460,8 +470,9 @@ function viewAbout(main) {
   <section class="panel prose" style="margin-top:16px"><h2>How this was built</h2>
     <p><b>1. Collection.</b> Files are downloaded from the Department of War PURSUE release manifest and checked for completeness (size, file signature, checksum). ${fmt(App.index.stats.reports)} files are analysed here${q.pending_sources ? `; ${q.pending_sources} more are awaiting analysis` : ""}.</p>
     <p><b>2. Text extraction.</b> Every scanned page is transcribed by a vision language model, which also notes handwriting, redactions, markings and pictures. Embedded text layers in scans are not trusted. If the primary model fails, a second local model is tried, then Tesseract OCR, then the embedded text layer; the path used is recorded per page. Video is sampled into frames that are described by the model; audio is transcribed in full, with official captions used where the publisher provides them.</p>
-    <p><b>3. Analysis.</b> The whole text of each file is read in page-aligned parts — nothing is sampled. Each part is mined for constituent records, incidents, people, organizations and key passages, then a file-level report is written. Quoted passages are checked against the extracted page text and labelled exact, approximate or not found.</p>
-    <p><b>4. Normalisation.</b> Dates are parsed conservatively (impossible dates are dropped, not guessed). Places are matched to a gazetteer and carry a precision level. Related reports and repeated accounts of the same event are linked with text embeddings.</p></section>
+    <p><b>3. Analysis.</b> The whole text of each file is read in page-aligned parts — nothing is sampled. Each part is mined for constituent records, incidents, people, organizations and key passages, then a file-level report is written. Quoted passages are checked against the extracted page text and labelled exact or approximate; quotes that cannot be found in the page text are not shown.</p>
+    <p><b>4. Normalisation.</b> Dates are parsed conservatively (impossible dates are dropped, not guessed). Places are matched to a gazetteer and carry a precision level. Related reports and repeated accounts of the same event are linked with text embeddings.</p>
+    <p><b>5. Connections.</b> Incidents are connected only by explicit factors, each stated on the link: same time and place (within a day and 150 km), matching description (same shape and colour within a week and 800 km), the same account in another file (a text match whose dates and places agree), a named person, or a mission or vessel. Text similarity alone never connects two incidents.</p></section>
   <section class="panel"><h2>Scales used in the reports</h2><dl class="kv">
     <dt>Disposition</dt><dd>The analyst's reading of the file: explained in the record, likely explained, insufficient information, unexplained in the record, or not a sighting record. "Unexplained in the record" means the file offers no resolution — not that the event is anomalous.</dd>
     <dt>Status in record</dt><dd>What the record itself says about an incident, kept separate from the analyst assessment.</dd>

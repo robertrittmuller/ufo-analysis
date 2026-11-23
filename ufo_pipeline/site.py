@@ -17,7 +17,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import llm
+from . import connections, llm
 from .analyze import DISPOSITIONS, documentation_score, load_units
 from .config import REPO_ROOT, Settings
 from .download import find_orphans, load_manifest
@@ -34,27 +34,26 @@ _MODEL_LABEL = re.compile(r"^(remote|local):\S+$")
 
 
 def model_kinds(settings: Settings) -> Dict[str, str]:
-    """Map each configured endpoint label ("remote:<model>") to a generic description of its model type."""
+    """Map each configured endpoint label ("remote:<model>") to its model type (no model name, no remote/local)."""
     kinds: Dict[str, str] = {}
     for endpoint in settings.review_chain():
-        kinds[endpoint.label] = f"{endpoint.name} vision-language model"
+        kinds[endpoint.label] = "vision-language model"
     for endpoint in settings.audio_chain():
-        kinds[endpoint.label] = f"{endpoint.name} speech-recognition model"
+        kinds[endpoint.label] = "speech-recognition model"
     if settings.local_embedding and settings.local_embedding.configured:
-        kinds[settings.local_embedding.label] = f"{settings.local_embedding.name} text-embedding model"
+        kinds[settings.local_embedding.label] = "text-embedding model"
     return kinds
 
 
 def _model_kind(label: str, kinds: Dict[str, str]) -> str:
     if label in kinds:
         return kinds[label]
-    where, _, name = label.partition(":")
-    name = name.lower()
+    name = label.partition(":")[2].lower()
     if re.search(r"asr|whisper|speech|transcri", name):
-        return f"{where} speech-recognition model"
+        return "speech-recognition model"
     if "embed" in name:
-        return f"{where} text-embedding model"
-    return f"{where} vision-language model"
+        return "text-embedding model"
+    return "vision-language model"
 
 
 def scrub_model_names(obj: Any, kinds: Dict[str, str]) -> Any:
@@ -337,6 +336,17 @@ def _corpus_summary(reports: List[Dict[str, Any]], stats: Dict[str, Any], settin
     return summary
 
 
+def hide_unmatched_quotes(report: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop quotes that could not be found in the page text (check == "unverified") from a published report.
+    They are still counted in the quality figures; only matched (exact or approximate) quotes are shown."""
+    keep = lambda quotes: [q for q in quotes or [] if not (isinstance(q, dict) and q.get("check") == "unverified")]
+    report = dict(report)
+    report["key_passages"] = keep(report.get("key_passages"))
+    report["incidents"] = [dict(inc, quotes=keep(inc.get("quotes"))) if isinstance(inc, dict) else inc
+                           for inc in report.get("incidents") or []]
+    return report
+
+
 def seo_description(stats: Dict[str, Any]) -> str:
     """Search-result description for the home page, with counts from the current build."""
     pages = int(stats.get("pages") or 0)
@@ -396,6 +406,7 @@ def run(settings: Settings, corpus_summary: bool = True, partial: bool = False) 
     index_reports: List[Dict[str, Any]] = []
     index_incidents: List[Dict[str, Any]] = []
     incident_titles: Dict[str, Dict[str, str]] = {}
+    incident_by_id: Dict[str, Dict[str, Any]] = {}
     for report in reports:
         for incident in report.get("incidents") or []:
             raw = incident["location"].get("raw")
@@ -405,6 +416,7 @@ def run(settings: Settings, corpus_summary: bool = True, partial: bool = False) 
                 incident["location"] = place
                 incident["documentation"] = documentation_score(incident)
             incident_titles[incident["id"]] = {"id": incident["id"], "title": incident["title"], "report": report["id"]}
+            incident_by_id[incident["id"]] = incident
     titles = {r["id"]: (r.get("synthesis") or {}).get("title") or (r.get("manifest") or {}).get("title") or r["filename"] for r in reports}
 
     people: Dict[str, Dict[str, Any]] = {}
@@ -484,10 +496,14 @@ def run(settings: Settings, corpus_summary: bool = True, partial: bool = False) 
         full["related"] = [{"id": link["id"], "title": titles.get(link["id"], link["id"]), "score": link["score"], "why": link["why"]}
                            for link in related.get(report["id"], []) if link["id"] in titles]
         for incident in full.get("incidents") or []:
-            incident["same_event"] = [incident_titles[i] for i in same_event.get(incident["id"], []) if i in incident_titles]
+            # "Same event in other files": the text match only counts when the dates and places agree (as on the
+            # Connections view), and only across files, since embed groups can chain same-file accounts in
+            incident["same_event"] = [incident_titles[i] for i in same_event.get(incident["id"], [])
+                                      if i in incident_titles and incident_titles[i]["report"] != report["id"]
+                                      and connections.same_event_agrees(incident, incident_by_id[i])]
             if incident["location"]["country"]:
                 incident["location"]["country_name"] = gazetteer.country_name(incident["location"]["country"])
-        atomic_write_json(reports_dir / f"{report['id']}.json", scrub_model_names(full, kinds))
+        atomic_write_json(reports_dir / f"{report['id']}.json", scrub_model_names(hide_unmatched_quotes(full), kinds))
 
         for unit in units:
             if unit["text"].strip():
@@ -521,6 +537,10 @@ def run(settings: Settings, corpus_summary: bool = True, partial: bool = False) 
         "incidents_by_explanation": dict(Counter(i["explanation"] for i in index_incidents).most_common()),
         "incidents_with_instrument_data": sum(1 for i in index_incidents if any(m.startswith(("radar", "infrared", "photo", "film", "sonar", "satellite")) for m in i["modes"])),
     }
+    graph = connections.build(reports, same_event)
+    atomic_write_json(data_dir / "connections.json", graph)
+    log(f"Connections: {graph['stats']}")
+
     summary = _corpus_summary(reports, stats, settings) if corpus_summary else ((read_json(settings.cache_dir / "corpus_summary.json") or {}).get("summary") or {})
 
     index = {
@@ -533,6 +553,7 @@ def run(settings: Settings, corpus_summary: bool = True, partial: bool = False) 
                      "equipment": top(equipment, 300)},
         "summary": summary,
         "search_shards": shard_files,
+        "connections": {"file": "data/connections.json", **graph["stats"]},
         "quality": {
             "ocr_methods": dict(methods), "ocr_providers": dict(providers), **dict(quality),
             "reports_complete": sum(1 for r in index_reports if r["status"] == "complete"),
@@ -541,7 +562,7 @@ def run(settings: Settings, corpus_summary: bool = True, partial: bool = False) 
             "located_incidents": sum(1 for i in index_incidents if i["lat"] is not None),
             "dated_incidents": sum(1 for i in index_incidents if i["year"]),
             "issues": issues,
-            "models": {"review": [kinds[e.label] for e in settings.review_chain()], "audio": [kinds[e.label] for e in settings.audio_chain()],
+            "models": {"review": sorted({kinds[e.label] for e in settings.review_chain()}), "audio": sorted({kinds[e.label] for e in settings.audio_chain()}),
                        "embedding": kinds.get(settings.local_embedding.label, "") if settings.local_embedding else ""},
         },
     }

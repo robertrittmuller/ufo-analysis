@@ -5,6 +5,7 @@ An interactive research dashboard for the U.S. Department of War [PURSUE](https:
 - **Overview** – corpus synthesis, incident timeline and map, explanation and evidence breakdowns, data-quality panel.
 - **Reports** – one deep report per released file: summary and key points with page citations, every incident in the file, the record's own conclusion kept separate from a machine assessment, provenance and redaction details, people and entities, related reports, and a page-by-page source-text reader.
 - **Incidents** – every extracted observation event, filterable and exportable (CSV/JSON).
+- **Connections** – a rotatable 3D network of incidents linked by explicit factors (same time and place, matching description, the same account in another file, a named person, a mission), with clusters of related events and the reason for every link.
 - **People & orgs**, **full-text search** over all page text, and a **methods** page.
 
 View the [live dashboard](https://ufo-analysis.rittmuller.com/).
@@ -28,7 +29,7 @@ manifest    frames,     report     reports,   (dashboard/data)
 | `embed` | Embeds reports and incidents to link related reports and the same event described in different files. | Local |
 | `build` | Writes `dashboard/data/` – a compact index, one JSON per report (loaded on demand), full-text search shards, frame thumbnails – and a corpus synthesis. | Remote → local |
 
-Every stage is **resumable**. Results are cached by file content and settings, a failed page or part is never cached as if it had succeeded, and re-running a stage redoes only missing or failed work. Each result records which model or fallback produced it; the published dashboard shows only the type of model (for example, remote vision-language model or local speech-recognition model), never the specific model name, per page and per report.
+Every stage is **resumable**. Results are cached by file content and settings, a failed page or part is never cached as if it had succeeded, and re-running a stage redoes only missing or failed work. Each result records which model or fallback produced it; the published dashboard shows only the type of model (vision-language, speech-recognition or text-embedding model), never the specific model name, per page and per report.
 
 ## Setup
 

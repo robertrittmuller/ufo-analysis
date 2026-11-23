@@ -197,3 +197,30 @@ details.more > summary { cursor: pointer; color: var(--teal); font-size: 13.5px;
 .static-page blockquote p { margin-bottom: 4px; }
 .static-page .kv { margin-top: 14px; }
 .file-list li { margin-bottom: 6px; }
+.hero .disclaimer { max-width: 720px; margin: 16px 0 0; padding: 8px 12px; border-left: 3px solid var(--gold); background: rgba(8,10,14,.7); color: var(--ink-2); font-size: 13.5px; }
+.static-page > .disclaimer { margin: 0 0 14px; padding: 8px 12px; border-left: 3px solid var(--gold); background: var(--surface); color: var(--ink-2); }
+
+/* connections: 3D network */
+.netgrid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start; scroll-margin-top: 70px; margin-bottom: 18px; }
+.netpanel { margin-bottom: 0; }
+.net3d { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid var(--hair);
+  background: radial-gradient(ellipse at 50% 45%, #121a27 0%, #0a0e15 70%); }
+.net3d canvas { display: block; width: 100%; height: min(70vh, 740px); cursor: grab; touch-action: none; }
+.net3d canvas:active { cursor: grabbing; }
+.factors { display: flex; flex-wrap: wrap; gap: 4px 14px; border: 0; padding: 0; margin: 0; align-items: center; }
+.factors legend { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 0; margin-bottom: 4px; width: 100%; }
+.filters .ftog { flex-direction: row; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; font-size: 13.5px; color: var(--ink-2); cursor: pointer; }
+.filters .ftog input { accent-color: var(--gold); margin: 0; min-width: 0; width: auto; }
+.ftog i, .fchip i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.fchips { display: flex; flex-wrap: wrap; gap: 4px; }
+.fchip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px 1px 6px; border-radius: 6px; background: var(--surface-3); font-size: 12px; color: var(--ink); white-space: nowrap; }
+.fchip b { font-weight: 600; color: var(--ink-2); }
+.netside { position: sticky; top: 70px; max-height: calc(100vh - 90px); overflow: auto; margin-bottom: 0; }
+.netside h3 { margin-top: 2px; overflow-wrap: anywhere; }
+.netlist { list-style: none; padding: 0; margin: 14px 0 0; display: flex; flex-direction: column; gap: 12px; }
+.netlist li { display: flex; flex-direction: column; gap: 2px; border-top: 1px solid var(--hair); padding-top: 10px; }
+.netlist .fl { display: inline-flex; gap: 8px; align-items: baseline; color: var(--ink); font-weight: 600; font-size: 14px; }
+.netlist .fl > i { width: 9px; height: 9px; border-radius: 50%; flex: none; margin-right: -4px; }
+.netlist .acc { display: block; padding-left: 17px; }
+tr.cur td { background: var(--gold-soft); }
+@media (max-width: 1000px) { .netgrid { grid-template-columns: 1fr; } .netside { position: static; max-height: none; } .net3d canvas { height: max(300px, 90vw); } }

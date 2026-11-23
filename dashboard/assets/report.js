@@ -74,7 +74,7 @@
     main.innerHTML = `<div class="report">
     <nav class="toc" aria-label="Report sections"><a href="#/reports">← All reports</a>${sections.map(([k, l]) => `<a href="#sec-${k}" data-sec="${k}">${esc(l)}</a>`).join("")}</nav>
     <article>
-      <header class="rhead"><div class="eyebrow">Deep report · ${esc(label("media", M.media_type))} · ${esc(M.agency || "")}</div><h1>${esc(R.title)}</h1>
+      <header class="rhead"><div class="eyebrow">Deep report · ${esc(label("media", M.media_type))}${M.agency ? ` · source: ${esc(M.agency)}` : ""}</div><h1>${esc(R.title)}</h1>
         <p class="pub">Published as: ${esc(M.title || R.filename)} · released ${esc(dateLabel(R.release) || M.release_date || "—")}${M.upstream_status === "removed" ? ' · <b style="color:var(--warn)">no longer listed upstream</b>' : ""}</p>
         <div class="chips">${badge("disposition", A.disposition)}${S.record_kind ? `<span class="chip">${esc(cap(S.record_kind))}</span>` : ""}${(S.themes || []).map((t) => `<a class="chip" href="#/reports?theme=${encodeURIComponent(t)}">${esc(t)}</a>`).join("")}</div>
         <div class="actions">${M.original_source_url ? `<a class="btn primary" href="${esc(M.original_source_url)}" target="_blank" rel="noopener">Open original file ↗</a>` : ""}
@@ -168,7 +168,7 @@
           ["How text was obtained", X.methods ? esc(Object.entries(X.methods).map(([k, v]) => `${METHOD[k] || k}: ${v}`).join("; ")) : ""], ["OCR models", X.providers ? esc(Object.entries(X.providers).map(([k, v]) => `${k}: ${v}`).join("; ")) : ""],
           ["Legibility", X.legibility ? esc(Object.entries(X.legibility).map(([k, v]) => `${k}: ${v}`).join("; ")) : ""], ["Handwritten pages", X.handwritten_pages || ""], ["Pages flagged for review", (X.flagged_pages || []).length ? esc(X.flagged_pages.join(", ")) : ""],
           ["Analysis models", esc(Object.entries(Q.providers || {}).map(([k, v]) => `${k}: ${v} part(s)`).concat(Q.synthesis_provider ? [`synthesis: ${Q.synthesis_provider}`] : []).join("; "))],
-          ["Quotes checked", Q.quotes_total ? `${Q.quotes_verified} exact, ${Q.quotes_approximate} approximate, ${Q.quotes_unverified} not found (of ${Q.quotes_total})` : ""], ["Analysed", esc(dateLabel((R.analyzed_at || "").slice(0, 10)))]])}
+          ["Quotes checked", Q.quotes_total ? `${Q.quotes_verified} exact, ${Q.quotes_approximate} approximate, ${Q.quotes_unverified} not found and hidden (of ${Q.quotes_total})` : ""], ["Analysed", esc(dateLabel((R.analyzed_at || "").slice(0, 10)))]])}
       </section>
     </article></div>`;
 
