@@ -276,11 +276,14 @@ The site loads its data with `fetch`, so serve the folder rather than opening th
 python3 -m http.server 8000 --directory dashboard
 ```
 
-Deployment is Cloudflare Workers Static Assets (`wrangler.toml`); Cloudflare uploads `dashboard/` as built and does not run the pipeline:
+Publishing is two steps: refresh the data, then deploy. Cloudflare does not run the pipeline; it serves what was built here.
 
 ```sh
-npx wrangler deploy
+tools/update_dashboard.sh         # download new files and rebuild
+tools/deploy.sh                   # publish the dashboard, the MCP database and the MCP server
 ```
+
+`tools/deploy.sh` deploys the dashboard (Cloudflare Workers Static Assets, `wrangler.toml`), reloads the [MCP server](#mcp-server)'s database when the data has changed, and deploys the MCP server. `--dry-run` runs every check and builds both Workers without publishing anything; `--force-data` reloads the database even when the data is unchanged. To publish the dashboard alone, run `npx wrangler deploy`.
 
 ## MCP server
 
@@ -311,14 +314,9 @@ The server is stateless and speaks both generations of the protocol on one endpo
 
 ### Deploying
 
-```sh
-cd mcp
-npx wrangler d1 create ufo-analysis      # once; put the printed database_id in mcp/wrangler.toml
-npx wrangler d1 execute ufo-analysis --remote --file ../data/mcp/d1.sql
-npx wrangler deploy
-```
+`tools/deploy.sh` publishes the server together with the dashboard (see [Viewing and deploying](#viewing-and-deploying)). It rewrites `data/mcp/d1.sql` from the built site, loads it into the D1 database named in `mcp/wrangler.toml` if it differs from the last load, and deploys the Worker. The load drops and recreates the data tables, so tool calls fail for the minute or so it takes.
 
-After each `build`, reload the database with the same `d1 execute` command. The load drops and recreates the data tables, so tool calls fail for the minute or so it takes.
+A new Cloudflare account needs its own database first: run `npx wrangler d1 create ufo-analysis` in `mcp/` and put the printed `database_id` in `mcp/wrangler.toml`.
 
 To run it locally:
 
@@ -352,6 +350,7 @@ npx wrangler dev                          # http://localhost:8787/mcp
 | `data/cache/` | Stage caches (`pages/`, `media/`, `analysis/`, `embeddings.json`, `relations.json`, `corpus_summary.json`) and `run_issues.json`, the report of the last run. |
 | `docs/screenshots/` | Images used in this README. |
 | `tools/update_dashboard.sh` | One-command refresh. |
+| `tools/deploy.sh` | One-command publish of the dashboard and the MCP server. |
 
 ## What the reports contain
 

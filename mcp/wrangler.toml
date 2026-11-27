@@ -18,7 +18,7 @@ cpu_ms = 50
 [[d1_databases]]
 binding = "DB"
 database_name = "ufo-analysis"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"   # printed by: npx wrangler d1 create ufo-analysis
+database_id = "332d08d6-7d7d-460d-a507-6a47a7528129"
 
 [[ratelimits]]
 name = "CLIENT_LIMITER"
