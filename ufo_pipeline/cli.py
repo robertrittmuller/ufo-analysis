@@ -19,8 +19,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Download, extract, analyze and publish the PURSUE UAP release corpus. "
         "Every stage is resumable: finished work is cached and only missing or failed items are redone.",
     )
-    parser.add_argument("stage", choices=STAGES + ["all", "process", "check"],
-                        help="'all' runs every stage; 'process' runs extract+analyze+embed+build; 'check' only runs the preflight")
+    parser.add_argument("stage", choices=STAGES + ["all", "process", "check", "export-d1"],
+                        help="'all' runs every stage; 'process' runs extract+analyze+embed+build; 'check' only runs the preflight; "
+                        "'export-d1' rewrites the MCP server's database file from the built site (build does this too)")
     parser.add_argument("--only", action="append", default=[], metavar="TEXT",
                         help="Only process sources whose filename contains TEXT (repeatable)")
     parser.add_argument("--limit", type=int, help="Process at most N sources (scratch runs)")
@@ -48,6 +49,12 @@ def main(argv: List[str] = None) -> int:
     partial = bool(args.only or args.limit or args.page_limit)
     if partial and "build" in stages and settings.site_dir == config.REPO_ROOT / "dashboard":
         raise SystemExit("Refusing to publish a partial corpus into dashboard/. Pass --site-dir for scratch builds.")
+
+    if args.stage == "export-d1":  # reads the built site only: no models or tools needed
+        from . import d1_export
+
+        d1_export.run(settings, config.REPO_ROOT / "dashboard")
+        return 0
 
     status = config.preflight(settings, stages or STAGES)
     log("Preflight: " + json.dumps({"tools": status["tools"], "endpoints": status["endpoints"]}))
@@ -81,6 +88,9 @@ def main(argv: List[str] = None) -> int:
             from . import site
 
             report["stages"]["build"] = site.run(settings, corpus_summary=not args.no_corpus_summary, partial=partial)
+            from . import d1_export
+
+            report["stages"]["d1_export"] = d1_export.run(settings, config.REPO_ROOT / "dashboard")
     report["finished"] = now_iso()
     report["usage"] = llm.USAGE.data
     atomic_write_json(settings.run_log_path, report, indent=1)

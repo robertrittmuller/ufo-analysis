@@ -15,6 +15,7 @@ This is an independent project. It is not affiliated with, endorsed by, or opera
 - [Setup](#setup)
 - [Running](#running)
 - [Viewing and deploying](#viewing-and-deploying)
+- [MCP server](#mcp-server)
 - [Repository layout](#repository-layout)
 - [What the reports contain](#what-the-reports-contain)
 - [Data and publishing notes](#data-and-publishing-notes)
@@ -241,7 +242,7 @@ python -m ufo_pipeline process    # everything except download
 tools/update_dashboard.sh         # download, then process (continues if some downloads fail)
 ```
 
-Individual stages: `download`, `extract`, `analyze`, `embed`, `build`.
+Individual stages: `download`, `extract`, `analyze`, `embed`, `build`. `export-d1` rewrites the [MCP server](#mcp-server)'s database file from the built site.
 
 Useful options:
 
@@ -281,6 +282,52 @@ Deployment is Cloudflare Workers Static Assets (`wrangler.toml`); Cloudflare upl
 npx wrangler deploy
 ```
 
+## MCP server
+
+The same data is available to AI agents through a [Model Context Protocol](https://modelcontextprotocol.io/) server at `https://ufo-analysis.rittmuller.com/mcp`. It is read-only, needs no account, and answers from exactly what the dashboard shows (labels after the consistency rules, model names replaced by model types, unmatched quotes hidden).
+
+```sh
+claude mcp add --transport http ufo-files https://ufo-analysis.rittmuller.com/mcp
+```
+
+| Tool | What it returns |
+|---|---|
+| `corpus_overview` | Corpus statistics, release dates, the written synthesis and the notes needed to read every other answer. |
+| `search_text` | Full-text search over every page and transcript, with snippet, page number and page URL. |
+| `search_incidents` | Incidents by text and filters (year, country, shape, sensor, status in the record, machine explanation, Hynek class, documentation strength, distance from a point). One row per event unless repeats are asked for. |
+| `get_incident` | One incident in full, with page-checked quotes, other accounts of the same event and linked incidents with the reason for each link. |
+| `search_reports` | Released files by text and filters (agency, media, kind, disposition, theme, release). |
+| `get_report` | One report in sections: summary, provenance, incidents, records, key passages, entities, related reports, media. |
+| `get_pages` | The extracted source text of a report, page by page, to verify a claim before quoting it. |
+| `find_entity` | A person, organisation, place, programme, piece of equipment or file number, and the reports that mention it. |
+
+Answers are bounded (limits, paging, a character budget for page text) and keep the record's own conclusion (`status_in_record`) apart from the machine assessment (`machine_explanation`, `machine_assessment`).
+
+### How it is built
+
+`build` writes `data/mcp/d1.sql` from the finished site data (`python -m ufo_pipeline export-d1` rewrites it without a full build). That file loads into a Cloudflare D1 database with SQLite full-text indexes. The server is a separate Worker in `mcp/` (plain JavaScript, no dependencies, no build step) on the route `ufo-analysis.rittmuller.com/mcp*`, so it deploys independently of the dashboard.
+
+The server is stateless and speaks both generations of the protocol on one endpoint: the 2026-07-28 revision (no handshake, `server/discover`) and the `initialize` handshake of 2025-11-25 and earlier.
+
+### Deploying
+
+```sh
+cd mcp
+npx wrangler d1 create ufo-analysis      # once; put the printed database_id in mcp/wrangler.toml
+npx wrangler d1 execute ufo-analysis --remote --file ../data/mcp/d1.sql
+npx wrangler deploy
+```
+
+After each `build`, reload the database with the same `d1 execute` command. The load drops and recreates the data tables, so tool calls fail for the minute or so it takes.
+
+To run it locally:
+
+```sh
+cd mcp
+npx wrangler d1 execute ufo-analysis --local --file ../data/mcp/d1.sql
+npx wrangler dev                          # http://localhost:8787/mcp
+```
+
 ## Repository layout
 
 | Path | Purpose |
@@ -294,10 +341,13 @@ npx wrangler deploy
 | `ufo_pipeline/consistency.py` | Deterministic label rules applied at build. |
 | `ufo_pipeline/connections.py` | Event grouping and the Connections graph and layout. |
 | `ufo_pipeline/pages.py` | Static per-report HTML pages under `/files/`. |
+| `ufo_pipeline/d1_export.py` | SQL export of the built site data for the MCP server's database. |
 | `ufo_pipeline/llm.py`, `geo.py`, `util.py` | Model client and fallback chains, place resolution, shared helpers. |
 | `dashboard/index.html`, `dashboard/assets/` | Hand-written front end (no build step). `app.js` is the overview and explorers, `report.js` the deep-report view, `connections.js` the 3D network. |
 | `dashboard/data/`, `dashboard/files/` | Generated site data and static report pages. Ignored by Git; produced by `build`. |
+| `mcp/` | The MCP server: `wrangler.toml`, and `src/` with the protocol layer (`index.js`), tools and SQL (`tools.js`), request accounting (`limits.js`) and search-query handling (`fts.js`). |
 | `data/sources/` | Downloaded source media. Ignored by Git. |
+| `data/mcp/d1.sql` | Database load file for the MCP server, written by `build`. |
 | `data/processed/source_manifest.json` | Source manifest with checksums. |
 | `data/cache/` | Stage caches (`pages/`, `media/`, `analysis/`, `embeddings.json`, `relations.json`, `corpus_summary.json`) and `run_issues.json`, the report of the last run. |
 | `docs/screenshots/` | Images used in this README. |

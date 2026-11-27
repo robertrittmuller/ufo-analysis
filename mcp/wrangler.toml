@@ -1,0 +1,34 @@
+# MCP server for the Declassified UFO Files corpus. See the README, "MCP server".
+
+name = "ufo-analysis-mcp"
+main = "src/index.js"
+compatibility_date = "2026-05-10"
+
+# Served on the route below only.
+workers_dev = false
+preview_urls = false
+
+[[routes]]
+pattern = "ufo-analysis.rittmuller.com/mcp*"
+zone_name = "rittmuller.com"
+
+[limits]
+cpu_ms = 50
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ufo-analysis"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"   # printed by: npx wrangler d1 create ufo-analysis
+
+[[ratelimits]]
+name = "CLIENT_LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 120
+  period = 60
+
+[vars]
+SITE_URL = "https://ufo-analysis.rittmuller.com"
+DAILY_REQUEST_BUDGET = "100000"
+DAILY_ROWS_READ_BUDGET = "400000000"
